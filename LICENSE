@@ -1,0 +1,55 @@
+MIT License
+
+Copyright (c) 2025 Christian Nennemann
+
+DISCLAIMER: This is an unofficial community project and is not associated with, 
+endorsed by, or affiliated with Jama Software in any way. This project is maintained 
+by community contributors and is not an official product of Jama Software.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+This project incorporates the following third-party open source software:
+
+1. aiohttp - MIT License - Copyright (c) 2013-2021 aio-libs collaboration
+   https://github.com/aio-libs/aiohttp/blob/master/LICENSE.txt
+
+2. py-jama-rest-client - MIT License - Copyright (c) 2017 Jarrod Wubbel
+   https://github.com/jamalshahverdiev/py-jama-rest-client/blob/master/LICENSE
+
+3. pydantic - MIT License - Copyright (c) 2017-present, Samuel Colvin and other contributors
+   https://github.com/pydantic/pydantic/blob/main/LICENSE
+
+4. loguru - MIT License - Copyright (c) 2017-present, Delgan
+   https://github.com/Delgan/loguru/blob/master/LICENSE
+
+5. typer - MIT License - Copyright (c) 2020 Sebastián Ramírez
+   https://github.com/tiangolo/typer/blob/master/LICENSE
+
+6. asyncio - PSF License - Copyright (c) Python Software Foundation
+   Part of the Python standard library
+
+7. jsonschema - MIT License - Copyright (c) 2013 Julian Berman
+   https://github.com/python-jsonschema/jsonschema/blob/main/COPYING
+
+8. python-dotenv - BSD 3-Clause License - Copyright (c) 2014, Saurabh Kumar
+   https://github.com/theskumar/python-dotenv/blob/master/LICENSE
+
+All third-party libraries used in this project are compatible with the MIT License.

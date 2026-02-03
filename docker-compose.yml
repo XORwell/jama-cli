@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  # Production-ready server
+  jama-cli:
+    build:
+      context: .
+      target: production
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./config.yml:/home/appuser/.jama/config.yml:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # Development server with hot reload
+  dev:
+    build:
+      context: .
+      target: development
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/.venv  # Don't override venv from host
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONDONTWRITEBYTECODE=1
+    command: poetry run jama serve --host 0.0.0.0 --port 8000
+
+  # Run tests
+  test:
+    build:
+      context: .
+      target: development
+    volumes:
+      - .:/app
+      - /app/.venv
+    command: poetry run pytest tests/ -v --cov=jama_cli --cov=jama_mcp_server --cov-report=term-missing
+
+  # Run linting
+  lint:
+    build:
+      context: .
+      target: development
+    volumes:
+      - .:/app
+      - /app/.venv
+    command: >
+      sh -c "
+        poetry run black --check . &&
+        poetry run isort --check-only . &&
+        poetry run ruff check . &&
+        poetry run mypy jama_mcp_server
+      "
+
+  # Format code
+  format:
+    build:
+      context: .
+      target: development
+    volumes:
+      - .:/app
+      - /app/.venv
+    command: >
+      sh -c "
+        poetry run black . &&
+        poetry run isort .
+      "
