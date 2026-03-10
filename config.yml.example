@@ -1,0 +1,48 @@
+# Multi-Server Configuration for Jama MCP Server
+# This is the recommended configuration format for managing multiple Jama instances
+
+# Default server to use when no --server option is specified
+default_server: sandbox
+
+# Server configurations
+servers:
+  # Sandbox environment for testing
+  sandbox:
+    url: https://your-sandbox.jamacloud.com
+    # OAuth client credentials (recommended)
+    oauth: true
+    client_id: your_client_id_here
+    client_secret: your_client_secret_here
+    
+  # Production environment
+  production:
+    url: https://your-production.jamacloud.com
+    # OAuth client credentials (recommended)
+    oauth: true
+    client_id: your_production_client_id
+    client_secret: your_production_client_secret
+    
+  # Alternative: Using API key authentication
+  api_key_example:
+    url: https://your-instance.jamacloud.com
+    api_key: your_api_key_here
+    
+  # Alternative: Using username/password authentication (less secure)
+  username_example:
+    url: https://your-instance.jamacloud.com
+    username: your_username
+    password: your_password
+
+# Usage examples:
+# 
+# 1. Use default profile:
+#    jama serve
+#
+# 2. Use specific profile:
+#    jama --profile production serve
+#
+# 3. List all configured profiles:
+#    jama config list
+#
+# 4. Run in stdio mode for Claude Desktop/Cline:
+#    jama serve --stdio
