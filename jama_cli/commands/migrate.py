@@ -88,7 +88,7 @@ class ExportData:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ExportData":
+    def from_dict(cls, data: dict[str, Any]) -> ExportData:
         """Load export data from dictionary."""
         metadata = ExportMetadata(
             source_url=data["metadata"]["source_url"],
@@ -248,7 +248,7 @@ def export_items(
                     item_ids = {item["id"] for item in items}
                     all_relationships: dict[int, dict[str, Any]] = {}
 
-                    for i, item in enumerate(items):
+                    for _, item in enumerate(items):
                         item_id = item.get("id")
                         if item_id:
                             try:
@@ -378,7 +378,7 @@ def import_items(
             data = json.load(f)
         export_data = ExportData.from_dict(data)
 
-        console.print(f"\n[bold]Import Preview[/bold]")
+        console.print("\n[bold]Import Preview[/bold]")
         console.print(f"  Source: {export_data.metadata.source_url}")
         console.print(f"  Source Project: {export_data.metadata.source_project}")
         console.print(f"  Export Date: {export_data.metadata.export_date}")
@@ -538,7 +538,7 @@ def _sort_by_hierarchy(
 
 def _preview_import(
     export_data: ExportData,
-    target_project: int,
+    _target_project: int,
     type_map: dict[int, int],
 ) -> None:
     """Preview what would be imported."""
@@ -669,7 +669,7 @@ def clone_items(
                 progress.update(task, completed=True)
 
         # Preview
-        console.print(f"\n[bold]Clone Preview[/bold]")
+        console.print("\n[bold]Clone Preview[/bold]")
         console.print(f"  Source Project: {source_project}")
         console.print(f"  Target Project: {target_project}")
         console.print(f"  Items to clone: {len(items)}")
@@ -721,7 +721,7 @@ def clone_items(
 
         if auto_container and not dry_run:
             # Find the root item(s) to determine what container we need
-            root_items = [i for i in items if i.get("location", {}).get("parent", {}).get("item") == source_parent or 
+            root_items = [i for i in items if i.get("location", {}).get("parent", {}).get("item") == source_parent or
                          i.get("location", {}).get("parent", {}).get("item") is None]
 
             if root_items:
@@ -909,7 +909,7 @@ def clone_items(
 
 @app.command("copy")
 def copy_between_instances(
-    ctx: typer.Context,
+    _ctx: typer.Context,
     source_project: Annotated[int, typer.Argument(help="Source project ID")],
     target_project: Annotated[int, typer.Argument(help="Target project ID")],
     source_profile: Annotated[str, typer.Option("--from", "-f", help="Source profile name")],
@@ -967,7 +967,7 @@ def copy_between_instances(
         source_client = JamaClient(source)
         target_client = JamaClient(target)
 
-        console.print(f"\n[bold]Cross-Instance Copy[/bold]")
+        console.print("\n[bold]Cross-Instance Copy[/bold]")
         console.print(f"  From: {source.url} (profile: {source_profile})")
         console.print(f"  To: {target.url} (profile: {target_profile})")
 
@@ -1103,7 +1103,7 @@ def show_export_info(
 
         export_data = ExportData.from_dict(data)
 
-        console.print(f"\n[bold]Export File Information[/bold]")
+        console.print("\n[bold]Export File Information[/bold]")
         console.print(f"  File: {input_file}")
         console.print(f"  Version: {export_data.metadata.version}")
         console.print(f"  Source URL: {export_data.metadata.source_url}")

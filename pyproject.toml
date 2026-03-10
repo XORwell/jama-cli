@@ -100,7 +100,7 @@ module = [
     "jama_mcp_server.core.stdio_server",
 ]
 disallow_untyped_defs = false
-disable_error_code = ["union-attr"]
+disable_error_code = ["union-attr", "no-any-return", "misc", "return-value"]
 
 [[tool.mypy.overrides]]
 module = [

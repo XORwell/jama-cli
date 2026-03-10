@@ -193,9 +193,8 @@ def _search_items(
         if regex and pattern:
             if pattern.search(value_str):
                 matches.append(item)
-        else:
-            if query in value_str:
-                matches.append(item)
+        elif query in value_str:
+            matches.append(item)
 
     return matches
 

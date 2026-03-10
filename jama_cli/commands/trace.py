@@ -69,7 +69,7 @@ def trace_matrix(
 ) -> None:
     """Generate a traceability matrix showing relationships between items.
 
-    Shows which source items (e.g., requirements) trace to which target items 
+    Shows which source items (e.g., requirements) trace to which target items
     (e.g., test cases), and identifies gaps in coverage.
 
     Uses bulk fetching and caching for fast performance on large projects.
@@ -105,7 +105,7 @@ def trace_matrix(
 
             task2 = progress.add_task("Fetching relationships (bulk)...", total=None)
             relationship_map = client.build_relationship_map(project_id, use_cache=use_cache)
-            progress.update(task2, completed=True, description=f"Built relationship map")
+            progress.update(task2, completed=True, description="Built relationship map")
 
         if not items:
             print_error("No items found in project")
@@ -190,7 +190,7 @@ def trace_matrix(
 
         # Calculate coverage stats
         total_sources = len(source_items)
-        traced_sources = len(set(d["source_id"] for d in trace_data if d["target_id"]))
+        traced_sources = len({d["source_id"] for d in trace_data if d["target_id"]})
         coverage_pct = (traced_sources / total_sources * 100) if total_sources > 0 else 0
 
         # Output
@@ -218,7 +218,7 @@ def trace_matrix(
             if traced_sources < total_sources:
                 console.print(f"[yellow]Warning:[/yellow] {total_sources - traced_sources} items have no downstream traces")
             if not refresh:
-                console.print(f"[dim]Using cached data. Use --refresh for fresh data.[/dim]")
+                console.print("[dim]Using cached data. Use --refresh for fresh data.[/dim]")
         else:
             format_output(trace_data, output_format)
 
@@ -278,7 +278,7 @@ def trace_coverage(
 
             task2 = progress.add_task("Fetching relationships (bulk)...", total=None)
             relationship_map = client.build_relationship_map(project_id, use_cache=use_cache)
-            progress.update(task2, completed=True, description=f"Built relationship map")
+            progress.update(task2, completed=True, description="Built relationship map")
 
         if item_type:
             items = [i for i in items if i.get("itemType") == item_type]
@@ -359,7 +359,7 @@ def trace_coverage(
 
             console.print(table)
             if not refresh:
-                console.print(f"\n[dim]Using cached data. Use --refresh for fresh data.[/dim]")
+                console.print("\n[dim]Using cached data. Use --refresh for fresh data.[/dim]")
         else:
             format_output(coverage_data, output_format)
 

@@ -149,7 +149,7 @@ class TestGetConfigPath:
         with patch.dict(os.environ, {}, clear=True), patch("jama_cli.config.CONFIG_FILE") as mock_config:
                 mock_config.exists.return_value = False
                 # Clear any JAMA_CONFIG env var
-                result = get_config_path()
+                _result = get_config_path()
                 # Should return something
 
 

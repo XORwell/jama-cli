@@ -6,10 +6,11 @@ import hashlib
 import json
 import logging
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from loguru import logger
 from py_jama_rest_client.client import JamaClient as PyJamaClient
@@ -151,7 +152,7 @@ class Cache:
             logger.debug(f"Invalidated {len(keys_to_delete)} cache entries matching '{pattern}'")
 
     @property
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, int | float]:
         """Get cache statistics."""
         return {
             "size": len(self._store),
@@ -173,7 +174,7 @@ def cached(ttl: int = 300, key_prefix: str = "") -> Callable[[Callable[..., T]],
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        def wrapper(self: "JamaClient", *args: Any, **kwargs: Any) -> T:
+        def wrapper(self: JamaClient, *args: Any, **kwargs: Any) -> T:
             # Build cache key from function name and arguments
             cache_key = f"{key_prefix or func.__name__}:{args}:{sorted(kwargs.items())}"
 
@@ -915,7 +916,7 @@ class JamaClient:
         attachment = client.get_attachment(attachment_id)
 
         # Get the file URL from attachment metadata
-        file_url = attachment.get("fileName")  # This may need adjustment based on API response
+        _file_url = attachment.get("fileName")  # This may need adjustment based on API response
 
         # For now, we store the metadata - actual file download would need
         # direct API access to the file endpoint

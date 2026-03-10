@@ -78,7 +78,7 @@ def diff_projects(
         source_client = JamaClient(source)
         target_client = JamaClient(target)
 
-        console.print(f"[bold]Cross-Instance Diff[/bold]")
+        console.print("[bold]Cross-Instance Diff[/bold]")
         console.print(f"  Source: {source.url} (project {source_project})")
         console.print(f"  Target: {target.url} (project {target_project})")
     else:
@@ -92,7 +92,7 @@ def diff_projects(
         source_client = JamaClient(profile)
         target_client = source_client
 
-        console.print(f"[bold]Project Diff[/bold]")
+        console.print("[bold]Project Diff[/bold]")
         console.print(f"  Source: Project {source_project}")
         console.print(f"  Target: Project {target_project}")
 
@@ -249,7 +249,7 @@ def _calculate_diff(
 def _display_diff_results(
     diff_result: dict[str, Any],
     key_field: str,
-    fields_to_compare: list[str],
+    _fields_to_compare: list[str],
     show_unchanged: bool = False,
     summary_only: bool = False,
 ) -> None:
