@@ -1,9 +1,9 @@
 # Jama CLI
 
-[![CI](https://github.com/XORwell/jama-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/XORwell/jama-cli/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/XORwell/jama-cli/ci.yml?branch=main&label=CI)](https://github.com/XORwell/jama-cli/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/jama-cli.svg)](https://pypi.org/project/jama-cli/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/jama-cli.svg)](https://pypi.org/project/jama-cli/)
-[![Docker Image](https://img.shields.io/badge/ghcr.io-jama--cli-blue)](https://github.com/XORwell/jama-cli/pkgs/container/jama-cli)
+
 
 A powerful command-line interface for Jama requirements management, with MCP (Model Context Protocol) server support for AI assistants.
 
