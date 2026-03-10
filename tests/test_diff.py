@@ -1,11 +1,6 @@
 """Tests for the diff module."""
 
-from jama_cli.commands.diff import (
-    _build_item_map,
-    _calculate_diff,
-    _get_field_value,
-    _get_item_key,
-)
+from jama_cli.commands.diff import _build_item_map, _calculate_diff, _get_field_value, _get_item_key
 
 
 class TestGetItemKey:

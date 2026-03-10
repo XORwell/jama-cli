@@ -23,7 +23,8 @@ class TestConfigListCommand:
         """Test listing profiles."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 profiles:
   default:
     url: https://default.jamacloud.com
@@ -34,7 +35,8 @@ profiles:
     auth_type: oauth
     client_id: client123
     client_secret: secret456
-""")
+"""
+            )
             with patch("jama_cli.config.get_config_path", return_value=config_path):
                 result = runner.invoke(app, ["list"])
                 assert result.exit_code == 0
@@ -80,13 +82,15 @@ class TestConfigRemoveCommand:
         """Test removing a profile."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 profiles:
   toremove:
     url: https://remove.jamacloud.com
     auth_type: api_key
     api_key: key123
-""")
+"""
+            )
             with patch("jama_cli.config.get_config_path", return_value=config_path):
                 result = runner.invoke(app, ["remove", "toremove"])
                 assert result.exit_code == 0
@@ -114,13 +118,15 @@ class TestConfigShowCommand:
         """Test showing a profile."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 profiles:
   showme:
     url: https://show.jamacloud.com
     auth_type: api_key
     api_key: key123
-""")
+"""
+            )
             with patch("jama_cli.config.get_config_path", return_value=config_path):
                 result = runner.invoke(app, ["show", "showme"])
                 assert result.exit_code == 0

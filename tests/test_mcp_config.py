@@ -5,12 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from jama_mcp_server.config import (
-    list_servers,
-    load_config,
-    load_env_config,
-    load_yaml_config,
-)
+from jama_mcp_server.config import list_servers, load_config, load_env_config, load_yaml_config
 from jama_mcp_server.models import JamaConfig, MultiServerConfig
 
 
@@ -88,7 +83,8 @@ class TestLoadYamlConfig:
         """Test loading config from YAML file."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   prod:
     url: https://prod.jamacloud.com
@@ -99,7 +95,8 @@ servers:
     username: user
     password: pass
 default_server: prod
-""")
+"""
+            )
             config = load_yaml_config(str(config_path))
             assert config is not None
             assert "prod" in config.servers
@@ -127,13 +124,15 @@ class TestLoadConfig:
         """Test loading config from YAML."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   test:
     url: https://test.jamacloud.com
     client_id: testclient
     client_secret: testsecret
-""")
+"""
+            )
             config = load_config(config_file=str(config_path), server_name="test")
             assert config is not None
             assert config.url == "https://test.jamacloud.com"
@@ -160,13 +159,15 @@ class TestListServers:
         """Test listing servers from config."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   prod:
     url: https://prod.jamacloud.com
   sandbox:
     url: https://sandbox.jamacloud.com
-""")
+"""
+            )
             servers = list_servers(str(config_path))
             assert "prod" in servers
             assert "sandbox" in servers
@@ -185,7 +186,8 @@ class TestLoadConfigIntegration:
         """Test loading config with named server."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   prod:
     url: https://prod.jamacloud.com
@@ -194,7 +196,8 @@ servers:
     url: https://sandbox.jamacloud.com
     api_key: sandboxkey
 default_server: prod
-""")
+"""
+            )
             config = load_config(config_file=str(config_path), server_name="sandbox")
             assert config is not None
             assert config.url == "https://sandbox.jamacloud.com"
@@ -203,7 +206,8 @@ default_server: prod
         """Test loading config uses default server."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   prod:
     url: https://prod.jamacloud.com
@@ -212,7 +216,8 @@ servers:
     url: https://sandbox.jamacloud.com
     api_key: sandboxkey
 default_server: prod
-""")
+"""
+            )
             config = load_config(config_file=str(config_path))
             assert config is not None
             assert config.url == "https://prod.jamacloud.com"
@@ -221,12 +226,14 @@ default_server: prod
         """Test loading config with single server and no default."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   only:
     url: https://only.jamacloud.com
     api_key: onlykey
-""")
+"""
+            )
             config = load_config(config_file=str(config_path))
             assert config is not None
             assert config.url == "https://only.jamacloud.com"
@@ -235,7 +242,8 @@ servers:
         """Test loading config with multiple servers and no default returns None."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   prod:
     url: https://prod.jamacloud.com
@@ -243,7 +251,8 @@ servers:
   sandbox:
     url: https://sandbox.jamacloud.com
     api_key: sandboxkey
-""")
+"""
+            )
             config = load_config(config_file=str(config_path))
             # Should return None because no default and multiple servers
             assert config is None
@@ -252,12 +261,14 @@ servers:
         """Test loading config with nonexistent server name."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   prod:
     url: https://prod.jamacloud.com
     api_key: prodkey
-""")
+"""
+            )
             config = load_config(config_file=str(config_path), server_name="nonexistent")
             assert config is None
 
@@ -281,9 +292,11 @@ class TestLoadYamlConfigEdgeCases:
         """Test loading YAML without servers key."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 other_key: value
-""")
+"""
+            )
             config = load_yaml_config(str(config_path))
             assert config is None
 
@@ -291,12 +304,14 @@ other_key: value
         """Test loading YAML from JAMA_CONFIG env var."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "myconfig.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 servers:
   test:
     url: https://test.jamacloud.com
     api_key: testkey
-""")
+"""
+            )
             with patch.dict(os.environ, {"JAMA_CONFIG": str(config_path)}):
                 config = load_yaml_config()
                 assert config is not None

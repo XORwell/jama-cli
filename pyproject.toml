@@ -2,7 +2,7 @@
 name = "jama-cli"
 version = "0.1.2"
 description = "Command-line interface for Jama requirements management with MCP server support"
-authors = ["Christian Nennemann <0lt7axgtr@mozmail.com>"]
+authors = ["Christian Nennemann <christian@nennemann.de>"]
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/XORwell/jama-cli"

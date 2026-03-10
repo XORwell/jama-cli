@@ -9,12 +9,7 @@ import typer
 
 from jama_cli.config import get_profile_or_env
 from jama_cli.core.client import JamaClient
-from jama_cli.output import (
-    OutputFormat,
-    format_single_item,
-    print_error,
-    print_success,
-)
+from jama_cli.output import OutputFormat, format_single_item, print_error, print_success
 
 app = typer.Typer(name="attachments", help="Manage item attachments")
 

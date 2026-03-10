@@ -172,7 +172,8 @@ class TestLoadConfig:
         """Test loading config with profiles."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 profiles:
   default:
     url: https://example.jamacloud.com
@@ -183,7 +184,8 @@ profiles:
     auth_type: oauth
     client_id: client123
     client_secret: secret456
-""")
+"""
+            )
             with patch("jama_cli.config.get_config_path", return_value=config_path):
                 config = load_config()
                 assert isinstance(config, JamaConfig)
@@ -221,13 +223,15 @@ class TestGetProfile:
         """Test getting profile by name."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            config_path.write_text("""
+            config_path.write_text(
+                """
 profiles:
   myprofile:
     url: https://my.jamacloud.com
     auth_type: api_key
     api_key: key123
-""")
+"""
+            )
             with patch("jama_cli.config.get_config_path", return_value=config_path):
                 profile = get_profile("myprofile")
                 assert profile is not None

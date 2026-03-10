@@ -4,11 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from jama_cli.commands.migrate import (
-    ExportData,
-    ExportMetadata,
-    _sort_by_hierarchy,
-)
+from jama_cli.commands.migrate import ExportData, ExportMetadata, _sort_by_hierarchy
 
 
 class TestExportMetadata:

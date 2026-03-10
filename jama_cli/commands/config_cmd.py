@@ -7,12 +7,7 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
-from jama_cli.config import (
-    CONFIG_FILE,
-    get_config_path,
-    load_config,
-    save_config,
-)
+from jama_cli.config import CONFIG_FILE, get_config_path, load_config, save_config
 from jama_cli.models import JamaProfile
 from jama_cli.output import console, print_error, print_success
 
