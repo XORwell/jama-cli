@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jama-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "Command-line interface for Jama requirements management with MCP server support"
 authors = ["Christian Nennemann <0lt7axgtr@mozmail.com>"]
 readme = "README.md"
