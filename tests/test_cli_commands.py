@@ -104,9 +104,7 @@ class TestItemsCommand:
         mock_client_class.return_value = mock_client
 
         # Use correct option names: -t for type, -n for name
-        result = runner.invoke(
-            app, ["create", "1", "-n", "New Item", "-t", "33"]
-        )
+        result = runner.invoke(app, ["create", "1", "-n", "New Item", "-t", "33"])
         assert result.exit_code == 0
 
     @patch("jama_cli.commands.items.JamaClient")
@@ -472,7 +470,11 @@ class TestSearchCommand:
         mock_get_profile.return_value = MagicMock()
         mock_client = MagicMock()
         mock_client.get_item_types.return_value = [
-            {"id": 1, "display": "Requirement", "fields": [{"name": "name"}, {"name": "description"}]},
+            {
+                "id": 1,
+                "display": "Requirement",
+                "fields": [{"name": "name"}, {"name": "description"}],
+            },
         ]
         mock_client_class.return_value = mock_client
 

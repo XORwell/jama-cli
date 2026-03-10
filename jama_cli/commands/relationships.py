@@ -1,4 +1,5 @@
 """Relationships commands."""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -30,7 +31,9 @@ def list_relationships(
 ) -> None:
     """List relationships for an item."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -80,7 +83,9 @@ def upstream_items(
 ) -> None:
     """Get items upstream (traced from) of this item."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -115,7 +120,9 @@ def downstream_items(
 ) -> None:
     """Get items downstream (traced to) of this item."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")

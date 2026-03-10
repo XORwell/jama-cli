@@ -25,7 +25,12 @@ class TestTraceMatrix:
         mock_get_profile.return_value = MagicMock()
         mock_client = MagicMock()
         mock_client.get_items.return_value = [
-            {"id": 1, "documentKey": "REQ-001", "itemType": 33, "fields": {"name": "Requirement 1"}},
+            {
+                "id": 1,
+                "documentKey": "REQ-001",
+                "itemType": 33,
+                "fields": {"name": "Requirement 1"},
+            },
             {"id": 2, "documentKey": "TC-001", "itemType": 45, "fields": {"name": "Test Case 1"}},
         ]
         mock_client.get_item_types.return_value = [
@@ -91,7 +96,10 @@ class TestTraceTree:
         mock_get_profile.return_value = MagicMock()
         mock_client = MagicMock()
         mock_client.get_item.return_value = {
-            "id": 1, "documentKey": "REQ-001", "itemType": 33, "fields": {"name": "Requirement 1"}
+            "id": 1,
+            "documentKey": "REQ-001",
+            "itemType": 33,
+            "fields": {"name": "Requirement 1"},
         }
         mock_client.get_item_types.return_value = [{"id": 33, "display": "Requirement"}]
         mock_client.get_item_upstream_related.return_value = []

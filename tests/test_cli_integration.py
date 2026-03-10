@@ -489,9 +489,7 @@ class TestDiffCommand:
 
     def test_diff_count(self, test_project_id: int, test_project_id_2: int) -> None:
         """Test diff count command."""
-        result = runner.invoke(
-            app, ["diff", "count", str(test_project_id), str(test_project_id_2)]
-        )
+        result = runner.invoke(app, ["diff", "count", str(test_project_id), str(test_project_id_2)])
         assert result.exit_code == 0
         assert "Item Type" in result.stdout or "Total" in result.stdout
 
@@ -692,6 +690,7 @@ class TestConfigCommand:
     def test_config_add_remove(self) -> None:
         """Test adding and removing a profile."""
         import time
+
         profile_name = f"pytest_profile_{int(time.time())}"
 
         # Add test profile
@@ -823,12 +822,20 @@ class TestErrorHandling:
     def test_invalid_project_id(self) -> None:
         """Test handling of invalid project ID."""
         result = runner.invoke(app, ["items", "list", "999999999"])
-        assert result.exit_code != 0 or "Error" in result.stdout or "not found" in result.stdout.lower()
+        assert (
+            result.exit_code != 0
+            or "Error" in result.stdout
+            or "not found" in result.stdout.lower()
+        )
 
     def test_invalid_item_id(self) -> None:
         """Test handling of invalid item ID."""
         result = runner.invoke(app, ["items", "get", "999999999"])
-        assert result.exit_code != 0 or "Error" in result.stdout or "not found" in result.stdout.lower()
+        assert (
+            result.exit_code != 0
+            or "Error" in result.stdout
+            or "not found" in result.stdout.lower()
+        )
 
     def test_missing_required_args(self) -> None:
         """Test handling of missing required arguments."""
@@ -1098,14 +1105,10 @@ class TestVerbosityModes:
 
     def test_verbose_mode(self, test_project_id: int) -> None:
         """Test verbose output."""
-        result = runner.invoke(
-            app, ["-v", "items", "list", str(test_project_id), "--limit", "2"]
-        )
+        result = runner.invoke(app, ["-v", "items", "list", str(test_project_id), "--limit", "2"])
         assert result.exit_code == 0
 
     def test_quiet_mode(self, test_project_id: int) -> None:
         """Test quiet output."""
-        result = runner.invoke(
-            app, ["-q", "items", "list", str(test_project_id), "--limit", "2"]
-        )
+        result = runner.invoke(app, ["-q", "items", "list", str(test_project_id), "--limit", "2"])
         assert result.exit_code == 0

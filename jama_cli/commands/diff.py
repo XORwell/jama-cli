@@ -1,4 +1,5 @@
 """Diff commands for comparing items between projects/instances."""
+
 from __future__ import annotations
 
 from typing import Annotated, Any
@@ -207,15 +208,19 @@ def _calculate_diff(
         target_item = target_map.get(key)
 
         if source_item and not target_item:
-            result["only_in_source"].append({
-                "key": key,
-                "item": source_item,
-            })
+            result["only_in_source"].append(
+                {
+                    "key": key,
+                    "item": source_item,
+                }
+            )
         elif target_item and not source_item:
-            result["only_in_target"].append({
-                "key": key,
-                "item": target_item,
-            })
+            result["only_in_target"].append(
+                {
+                    "key": key,
+                    "item": target_item,
+                }
+            )
         else:
             # Both exist - compare fields
             differences = []
@@ -224,24 +229,30 @@ def _calculate_diff(
                 target_val = _get_field_value(target_item, field)
 
                 if source_val != target_val:
-                    differences.append({
-                        "field": field,
-                        "source": source_val,
-                        "target": target_val,
-                    })
+                    differences.append(
+                        {
+                            "field": field,
+                            "source": source_val,
+                            "target": target_val,
+                        }
+                    )
 
             if differences:
-                result["modified"].append({
-                    "key": key,
-                    "source_item": source_item,
-                    "target_item": target_item,
-                    "differences": differences,
-                })
+                result["modified"].append(
+                    {
+                        "key": key,
+                        "source_item": source_item,
+                        "target_item": target_item,
+                        "differences": differences,
+                    }
+                )
             else:
-                result["unchanged"].append({
-                    "key": key,
-                    "item": source_item,
-                })
+                result["unchanged"].append(
+                    {
+                        "key": key,
+                        "item": source_item,
+                    }
+                )
 
     return result
 
@@ -249,7 +260,7 @@ def _calculate_diff(
 def _display_diff_results(
     diff_result: dict[str, Any],
     key_field: str,
-    _fields_to_compare: list[str],
+    fields_to_compare: list[str],  # noqa: ARG001
     show_unchanged: bool = False,
     summary_only: bool = False,
 ) -> None:

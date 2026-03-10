@@ -25,8 +25,18 @@ class TestBaselineList:
         mock_get_profile.return_value = MagicMock()
         mock_client = MagicMock()
         mock_client.get_baselines.return_value = [
-            {"id": 1, "name": "Baseline 1", "description": "First baseline", "createdDate": "2024-01-01T00:00:00"},
-            {"id": 2, "name": "Baseline 2", "description": "Second baseline", "createdDate": "2024-01-02T00:00:00"},
+            {
+                "id": 1,
+                "name": "Baseline 1",
+                "description": "First baseline",
+                "createdDate": "2024-01-01T00:00:00",
+            },
+            {
+                "id": 2,
+                "name": "Baseline 2",
+                "description": "Second baseline",
+                "createdDate": "2024-01-02T00:00:00",
+            },
         ]
         mock_client_class.return_value = mock_client
 
@@ -56,7 +66,9 @@ class TestBaselineGet:
         mock_get_profile.return_value = MagicMock()
         mock_client = MagicMock()
         mock_client.get_baseline.return_value = {
-            "id": 1, "name": "Baseline 1", "description": "Test baseline"
+            "id": 1,
+            "name": "Baseline 1",
+            "description": "Test baseline",
         }
         mock_client_class.return_value = mock_client
 
@@ -115,7 +127,12 @@ class TestBaselineDiff:
             ],
             # Baseline 2 items (one modified, one removed, one added)
             [
-                {"id": 1, "documentKey": "REQ-001", "version": 2, "fields": {"name": "Item 1 Updated"}},
+                {
+                    "id": 1,
+                    "documentKey": "REQ-001",
+                    "version": 2,
+                    "fields": {"name": "Item 1 Updated"},
+                },
                 {"id": 3, "documentKey": "REQ-003", "version": 1, "fields": {"name": "Item 3 New"}},
             ],
         ]

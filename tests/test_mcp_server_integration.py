@@ -82,7 +82,10 @@ class TestMCPServerHealth:
     async def test_health_endpoint(self, mcp_server) -> None:
         """Test /health endpoint."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.get(f"http://localhost:{port}/health") as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(f"http://localhost:{port}/health") as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert data["status"] == "healthy"
@@ -93,7 +96,10 @@ class TestMCPServerHealth:
     async def test_ready_endpoint(self, mcp_server) -> None:
         """Test /ready endpoint."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.get(f"http://localhost:{port}/ready") as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(f"http://localhost:{port}/ready") as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert data["ready"] is True
@@ -101,11 +107,16 @@ class TestMCPServerHealth:
     async def test_metrics_endpoint(self, mcp_server) -> None:
         """Test /metrics endpoint."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.get(f"http://localhost:{port}/metrics") as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(f"http://localhost:{port}/metrics") as response,
+        ):
             assert response.status == 200
             data = await response.json()
             # Check for various metric keys that might be present
-            assert any(key in data for key in ["request_count", "requests", "uptime_seconds", "uptime"])
+            assert any(
+                key in data for key in ["request_count", "requests", "uptime_seconds", "uptime"]
+            )
 
 
 @pytest.mark.integration
@@ -116,10 +127,13 @@ class TestMCPServerInvoke:
     async def test_invoke_get_projects(self, mcp_server) -> None:
         """Test invoking get_projects."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={"prompt": "get_projects"},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={"prompt": "get_projects"},
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert "response" in data
@@ -130,13 +144,16 @@ class TestMCPServerInvoke:
     async def test_invoke_get_items(self, mcp_server, test_project_id: int) -> None:
         """Test invoking get_items for a project."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={
-                "prompt": f"get items from project {test_project_id}",
-                "parameters": {"project_id": test_project_id},
-            },
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={
+                    "prompt": f"get items from project {test_project_id}",
+                    "parameters": {"project_id": test_project_id},
+                },
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert "response" in data
@@ -146,13 +163,16 @@ class TestMCPServerInvoke:
     async def test_invoke_get_item(self, mcp_server, test_item_id: int) -> None:
         """Test invoking get_item for a specific item."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={
-                "prompt": f"get item {test_item_id}",
-                "parameters": {"item_id": test_item_id},
-            },
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={
+                    "prompt": f"get item {test_item_id}",
+                    "parameters": {"item_id": test_item_id},
+                },
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert "response" in data
@@ -160,10 +180,13 @@ class TestMCPServerInvoke:
     async def test_invoke_get_item_types(self, mcp_server) -> None:
         """Test invoking get_item_types."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={"prompt": "get_item_types"},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={"prompt": "get_item_types"},
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert "response" in data
@@ -174,10 +197,13 @@ class TestMCPServerInvoke:
     async def test_invoke_get_relationship_types(self, mcp_server) -> None:
         """Test invoking get_relationship_types."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={"prompt": "get_relationship_types"},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={"prompt": "get_relationship_types"},
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert "response" in data
@@ -185,10 +211,13 @@ class TestMCPServerInvoke:
     async def test_invoke_invalid_prompt(self, mcp_server) -> None:
         """Test invoking with empty prompt."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={"prompt": ""},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={"prompt": ""},
+            ) as response,
+        ):
             # Should return validation error or error response
             # Any status is acceptable as long as server responds
             assert response.status in [200, 400, 422, 500]
@@ -202,15 +231,18 @@ class TestMCPServerBatch:
     async def test_batch_requests(self, mcp_server) -> None:
         """Test batch requests."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/batch",
-            json={
-                "requests": [
-                    {"prompt": "get_projects"},
-                    {"prompt": "get_item_types"},
-                ]
-            },
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/batch",
+                json={
+                    "requests": [
+                        {"prompt": "get_projects"},
+                        {"prompt": "get_item_types"},
+                    ]
+                },
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             assert "responses" in data
@@ -220,10 +252,13 @@ class TestMCPServerBatch:
     async def test_batch_empty_requests(self, mcp_server) -> None:
         """Test batch with empty requests list."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/batch",
-            json={"requests": []},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/batch",
+                json={"requests": []},
+            ) as response,
+        ):
             # Should return validation error
             assert response.status in [400, 422]
 
@@ -236,20 +271,26 @@ class TestMCPServerSSE:
     async def test_sse_connection(self, mcp_server) -> None:
         """Test SSE endpoint accepts connection."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.get(
-            f"http://localhost:{port}/v1/sse",
-            timeout=aiohttp.ClientTimeout(total=2),
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                f"http://localhost:{port}/v1/sse",
+                timeout=aiohttp.ClientTimeout(total=2),
+            ) as response,
+        ):
             assert response.status == 200
             assert "text/event-stream" in response.content_type
 
     async def test_sse_message(self, mcp_server) -> None:
         """Test sending message to SSE endpoint."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/messages",
-            json={"prompt": "test message"},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/messages",
+                json={"prompt": "test message"},
+            ) as response,
+        ):
             # SSE message endpoint - may return various status codes
             assert response.status in [200, 202, 400, 422]
 
@@ -259,25 +300,26 @@ class TestMCPServerSSE:
 class TestMCPServerCRUD:
     """Test MCP server CRUD operations via invoke."""
 
-    async def test_create_get_update_delete_item(
-        self, mcp_server, test_project_id: int
-    ) -> None:
+    async def test_create_get_update_delete_item(self, mcp_server, test_project_id: int) -> None:
         """Test complete item lifecycle via MCP server."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={
-                "prompt": "create_item",
-                "parameters": {
-                    "project_id": test_project_id,
-                    "item_type_id": 33,
-                    "fields": {
-                        "name": "MCP_TEST_ITEM",
-                        "description": "Created via MCP",
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={
+                    "prompt": "create_item",
+                    "parameters": {
+                        "project_id": test_project_id,
+                        "item_type_id": 33,
+                        "fields": {
+                            "name": "MCP_TEST_ITEM",
+                            "description": "Created via MCP",
+                        },
                     },
                 },
-            },
-        ) as response:
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
 
@@ -328,31 +370,40 @@ class TestMCPServerErrorHandling:
     async def test_invalid_json(self, mcp_server) -> None:
         """Test handling of invalid JSON."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            data="not valid json",
-            headers={"Content-Type": "application/json"},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                data="not valid json",
+                headers={"Content-Type": "application/json"},
+            ) as response,
+        ):
             # Server should return error status for invalid JSON
             assert response.status in [400, 422, 500]
 
     async def test_missing_prompt(self, mcp_server) -> None:
         """Test handling of missing prompt field."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={"parameters": {}},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={"parameters": {}},
+            ) as response,
+        ):
             # Should return error response
             assert response.status in [200, 400, 422, 500]
 
     async def test_unknown_operation(self, mcp_server) -> None:
         """Test handling of unknown operation."""
         server, port = mcp_server
-        async with aiohttp.ClientSession() as session, session.post(
-            f"http://localhost:{port}/v1/invoke",
-            json={"prompt": "completely_unknown_operation_xyz"},
-        ) as response:
+        async with (
+            aiohttp.ClientSession() as session,
+            session.post(
+                f"http://localhost:{port}/v1/invoke",
+                json={"prompt": "completely_unknown_operation_xyz"},
+            ) as response,
+        ):
             assert response.status == 200
             data = await response.json()
             # Should return some response even for unknown operations
@@ -369,10 +420,13 @@ class TestMCPServerPerformance:
         server, port = mcp_server
 
         async def make_request():
-            async with aiohttp.ClientSession() as session, session.post(
-                f"http://localhost:{port}/v1/invoke",
-                json={"prompt": "get_item_types"},
-            ) as response:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    f"http://localhost:{port}/v1/invoke",
+                    json={"prompt": "get_item_types"},
+                ) as response,
+            ):
                 return response.status
 
         # Make 5 concurrent requests

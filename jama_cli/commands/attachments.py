@@ -1,4 +1,5 @@
 """Attachments commands."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +26,9 @@ def get_attachment(
 ) -> None:
     """Get attachment metadata."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")

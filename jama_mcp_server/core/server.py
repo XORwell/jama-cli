@@ -4,6 +4,7 @@ Core MCP server implementation for Jama integration.
 This module provides a production-ready HTTP server for the Jama MCP protocol
 with support for security features, metrics, and graceful shutdown.
 """
+
 from __future__ import annotations
 
 import asyncio

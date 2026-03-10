@@ -54,11 +54,17 @@ class TestConfigAddCommand:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
             with patch("jama_cli.config.get_config_path", return_value=config_path):
-                result = runner.invoke(app, [
-                    "add", "testprofile",
-                    "-u", "https://test.jamacloud.com",
-                    "--api-key", "myapikey",
-                ])
+                result = runner.invoke(
+                    app,
+                    [
+                        "add",
+                        "testprofile",
+                        "-u",
+                        "https://test.jamacloud.com",
+                        "--api-key",
+                        "myapikey",
+                    ],
+                )
                 assert result.exit_code == 0
 
 

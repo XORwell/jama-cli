@@ -1,4 +1,5 @@
 """Pick lists commands."""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -18,7 +19,9 @@ def list_pick_lists(
 ) -> None:
     """List all pick lists."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -47,7 +50,9 @@ def get_pick_list(
 ) -> None:
     """Get details of a specific pick list."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -75,7 +80,9 @@ def list_options(
 ) -> None:
     """List options for a pick list."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")

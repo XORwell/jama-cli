@@ -30,11 +30,16 @@ class TestMigrateExportCommand:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_file = Path(tmpdir) / "export.json"
-            result = runner.invoke(app, [
-                "export", "1",
-                "--output", str(output_file),
-                "--no-relationships",
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "export",
+                    "1",
+                    "--output",
+                    str(output_file),
+                    "--no-relationships",
+                ],
+            )
             # Should complete without error
             assert result.exit_code in [0, 1]
 
@@ -53,11 +58,16 @@ class TestMigrateExportCommand:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_file = Path(tmpdir) / "export.json"
-            result = runner.invoke(app, [
-                "export", "1",
-                "--output", str(output_file),
-                "--relationships",
-            ])
+            result = runner.invoke(
+                app,
+                [
+                    "export",
+                    "1",
+                    "--output",
+                    str(output_file),
+                    "--relationships",
+                ],
+            )
             assert result.exit_code in [0, 1]
 
     @patch("jama_cli.commands.migrate.get_profile_or_env")
@@ -81,25 +91,39 @@ class TestMigrateImportCommand:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             input_file = Path(tmpdir) / "import.json"
-            input_file.write_text(json.dumps({
-                "items": [{"id": 1, "fields": {"name": "Test"}, "itemType": 33}],
-                "relationships": [],
-            }))
-            result = runner.invoke(app, [
-                "import", str(input_file),
-                "--project", "1",
-                "--dry-run",
-            ])
+            input_file.write_text(
+                json.dumps(
+                    {
+                        "items": [{"id": 1, "fields": {"name": "Test"}, "itemType": 33}],
+                        "relationships": [],
+                    }
+                )
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "import",
+                    str(input_file),
+                    "--project",
+                    "1",
+                    "--dry-run",
+                ],
+            )
             assert result.exit_code in [0, 1]
 
     @patch("jama_cli.commands.migrate.get_profile_or_env")
     def test_import_file_not_found(self, mock_get_profile):
         """Test import with non-existent file."""
         mock_get_profile.return_value = MagicMock()
-        result = runner.invoke(app, [
-            "import", "/nonexistent/file.json",
-            "--project", "1",
-        ])
+        result = runner.invoke(
+            app,
+            [
+                "import",
+                "/nonexistent/file.json",
+                "--project",
+                "1",
+            ],
+        )
         assert result.exit_code == 1
 
 

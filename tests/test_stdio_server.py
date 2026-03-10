@@ -38,12 +38,14 @@ class TestStdioProtocol:
 
     def test_parse_json_rpc(self):
         """Test parsing JSON-RPC message."""
-        message = json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "test",
-            "params": {},
-        })
+        message = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "test",
+                "params": {},
+            }
+        )
 
         parsed = json.loads(message)
         assert parsed["jsonrpc"] == "2.0"

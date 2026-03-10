@@ -1,4 +1,5 @@
 """Version history commands for items."""
+
 from __future__ import annotations
 
 import json
@@ -56,13 +57,21 @@ def list_versions(
         # Simplify for display
         display_data = []
         for v in versions:
-            display_data.append({
-                "version": v.get("version", ""),
-                "type": v.get("type", v.get("versionedItem", {}).get("type", "")),
-                "created": _format_date(v.get("createdDate", v.get("versionedItem", {}).get("createdDate"))),
-                "createdBy": v.get("createdBy", {}).get("username", "") if isinstance(v.get("createdBy"), dict) else "",
-                "comment": v.get("comment", "")[:50] if v.get("comment") else "",
-            })
+            display_data.append(
+                {
+                    "version": v.get("version", ""),
+                    "type": v.get("type", v.get("versionedItem", {}).get("type", "")),
+                    "created": _format_date(
+                        v.get("createdDate", v.get("versionedItem", {}).get("createdDate"))
+                    ),
+                    "createdBy": (
+                        v.get("createdBy", {}).get("username", "")
+                        if isinstance(v.get("createdBy"), dict)
+                        else ""
+                    ),
+                    "comment": v.get("comment", "")[:50] if v.get("comment") else "",
+                }
+            )
 
         # Sort by version descending
         display_data.sort(key=lambda x: x.get("version", 0), reverse=True)
@@ -155,12 +164,14 @@ def diff_versions(
             v2_val = v2_fields.get(key)
 
             if v1_val != v2_val:
-                diff_data.append({
-                    "field": key,
-                    "old_value": _format_value(v1_val),
-                    "new_value": _format_value(v2_val),
-                    "change": _get_change_type(v1_val, v2_val),
-                })
+                diff_data.append(
+                    {
+                        "field": key,
+                        "old_value": _format_value(v1_val),
+                        "new_value": _format_value(v2_val),
+                        "change": _get_change_type(v1_val, v2_val),
+                    }
+                )
 
         if not diff_data:
             print_info("No differences found between versions")
@@ -212,7 +223,7 @@ def _truncate(text: str, max_len: int) -> str:
     """Truncate text with ellipsis."""
     if len(text) <= max_len:
         return text
-    return text[:max_len - 3] + "..."
+    return text[: max_len - 3] + "..."
 
 
 def _get_change_type(old_val: Any, new_val: Any) -> str:

@@ -1,4 +1,5 @@
 """Configuration management for Jama CLI."""
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,5 @@
 """Jama API client wrapper for CLI operations."""
+
 from __future__ import annotations
 
 import contextlib
@@ -158,9 +159,11 @@ class Cache:
             "size": len(self._store),
             "hits": self._hits,
             "misses": self._misses,
-            "hit_rate": round(self._hits / (self._hits + self._misses) * 100, 1)
-            if (self._hits + self._misses) > 0
-            else 0,
+            "hit_rate": (
+                round(self._hits / (self._hits + self._misses) * 100, 1)
+                if (self._hits + self._misses) > 0
+                else 0
+            ),
         }
 
 
@@ -310,7 +313,9 @@ class JamaClient:
         if use_cache and self._disk_cache:
             cached = self._disk_cache.get(cache_key)
             if cached is not None:
-                logger.debug(f"Disk cache hit: {len(cached)} relationships for project {project_id}")
+                logger.debug(
+                    f"Disk cache hit: {len(cached)} relationships for project {project_id}"
+                )
                 return cached
 
         # Fetch from API
@@ -342,10 +347,7 @@ class JamaClient:
             Dict mapping item_id -> {"upstream": [...], "downstream": [...]}
         """
         # Return cached map if available for same project
-        if (
-            self._relationship_map is not None
-            and self._relationship_map_project == project_id
-        ):
+        if self._relationship_map is not None and self._relationship_map_project == project_id:
             return self._relationship_map
 
         relationships = self.get_project_relationships_bulk(project_id, use_cache)
@@ -560,34 +562,39 @@ class JamaClient:
             # Filter by target type
             if target_type:
                 downstream_ids = [
-                    tid for tid in downstream_ids
+                    tid
+                    for tid in downstream_ids
                     if item_map.get(tid, {}).get("itemType") == target_type
                 ]
 
             if downstream_ids:
                 for target_id in downstream_ids:
                     target = item_map.get(target_id, {})
-                    trace_data.append({
+                    trace_data.append(
+                        {
+                            "source_id": item_id,
+                            "source_key": item.get("documentKey", ""),
+                            "source_name": item.get("fields", {}).get("name", ""),
+                            "source_type": item.get("itemType"),
+                            "target_id": target_id,
+                            "target_key": target.get("documentKey", ""),
+                            "target_name": target.get("fields", {}).get("name", ""),
+                            "target_type": target.get("itemType"),
+                        }
+                    )
+            else:
+                trace_data.append(
+                    {
                         "source_id": item_id,
                         "source_key": item.get("documentKey", ""),
                         "source_name": item.get("fields", {}).get("name", ""),
                         "source_type": item.get("itemType"),
-                        "target_id": target_id,
-                        "target_key": target.get("documentKey", ""),
-                        "target_name": target.get("fields", {}).get("name", ""),
-                        "target_type": target.get("itemType"),
-                    })
-            else:
-                trace_data.append({
-                    "source_id": item_id,
-                    "source_key": item.get("documentKey", ""),
-                    "source_name": item.get("fields", {}).get("name", ""),
-                    "source_type": item.get("itemType"),
-                    "target_id": None,
-                    "target_key": "",
-                    "target_name": "(no coverage)",
-                    "target_type": None,
-                })
+                        "target_id": None,
+                        "target_key": "",
+                        "target_name": "(no coverage)",
+                        "target_type": None,
+                    }
+                )
 
             if progress_callback:
                 progress_callback(idx + 1, total)
@@ -662,7 +669,9 @@ class JamaClient:
         """
         client = self._ensure_connected()
         # Access the underlying API directly for single page
-        resource_path = f"items?project={project_id}&startAt={start_at}&maxResults={min(max_results, 50)}"
+        resource_path = (
+            f"items?project={project_id}&startAt={start_at}&maxResults={min(max_results, 50)}"
+        )
         response = client._JamaClient__core.get(resource_path)
         # Parse JSON from response
         data = response.json()
@@ -924,6 +933,7 @@ class JamaClient:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             import json
+
             json.dump(attachment, f, indent=2)
 
     def upload_attachment(

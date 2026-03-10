@@ -1,6 +1,7 @@
 """
 Data models for the Jama MCP server.
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -137,9 +138,7 @@ class HealthCheckResponse(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    status: Literal["healthy", "unhealthy", "degraded"] = Field(
-        ..., description="Health status"
-    )
+    status: Literal["healthy", "unhealthy", "degraded"] = Field(..., description="Health status")
     jama_connected: bool = Field(..., description="Whether connected to Jama")
     jama_url: str = Field(..., description="Jama URL")
     jama_projects_count: int | None = Field(
@@ -147,9 +146,7 @@ class HealthCheckResponse(BaseModel):
     )
     error: str | None = Field(default=None, description="Error message if any")
     version: str | None = Field(default=None, description="Server version")
-    uptime_seconds: float | None = Field(
-        default=None, description="Server uptime in seconds"
-    )
+    uptime_seconds: float | None = Field(default=None, description="Server uptime in seconds")
 
 
 class BatchRequest(BaseModel):
@@ -179,9 +176,7 @@ class ErrorResponse(BaseModel):
     success: bool = Field(default=False, description="Always false for errors")
     error: str = Field(..., description="Error message")
     error_code: str = Field(..., description="Error code for programmatic handling")
-    details: dict[str, Any] | None = Field(
-        default=None, description="Additional error details"
-    )
+    details: dict[str, Any] | None = Field(default=None, description="Additional error details")
 
 
 # Export all models

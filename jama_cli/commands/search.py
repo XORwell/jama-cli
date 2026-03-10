@@ -1,4 +1,5 @@
 """Search commands for finding items across Jama."""
+
 from __future__ import annotations
 
 import re
@@ -59,7 +60,9 @@ def search_items(
         jama search items "error" -f description     # Search in description field
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")

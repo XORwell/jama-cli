@@ -1,4 +1,5 @@
 """Tags commands."""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -19,7 +20,9 @@ def list_tags(
 ) -> None:
     """List all tags in a project."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -52,7 +55,9 @@ def list_tagged_items(
 ) -> None:
     """List items with a specific tag."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")

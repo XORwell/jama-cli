@@ -87,11 +87,13 @@ class TestHealthCheck:
 
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "status": "healthy",
-            "jama_connected": True,
-            "jama_url": "http://jama.example.com",
-        })
+        mock_response.json = AsyncMock(
+            return_value={
+                "status": "healthy",
+                "jama_connected": True,
+                "jama_url": "http://jama.example.com",
+            }
+        )
 
         mock_context = MagicMock()
         mock_context.__aenter__ = AsyncMock(return_value=mock_response)
@@ -153,11 +155,13 @@ class TestHealthCheck:
             def set_session():
                 mock_response = MagicMock()
                 mock_response.status = 200
-                mock_response.json = AsyncMock(return_value={
-                    "status": "healthy",
-                    "jama_connected": True,
-                    "jama_url": "http://jama",
-                })
+                mock_response.json = AsyncMock(
+                    return_value={
+                        "status": "healthy",
+                        "jama_connected": True,
+                        "jama_url": "http://jama",
+                    }
+                )
 
                 mock_context = MagicMock()
                 mock_context.__aenter__ = AsyncMock(return_value=mock_response)
@@ -182,10 +186,12 @@ class TestInvoke:
 
         mock_response = MagicMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={
-            "response": "Success",
-            "metadata": {"intent": "get_projects"},
-        })
+        mock_response.json = AsyncMock(
+            return_value={
+                "response": "Success",
+                "metadata": {"intent": "get_projects"},
+            }
+        )
 
         mock_context = MagicMock()
         mock_context.__aenter__ = AsyncMock(return_value=mock_response)
@@ -266,6 +272,7 @@ class TestInvoke:
         client = JamaMCPClient("http://localhost:8000")
 
         with patch.object(client, "connect", new_callable=AsyncMock) as mock_connect:
+
             def set_session():
                 mock_response = MagicMock()
                 mock_response.status = 200

@@ -1,4 +1,5 @@
 """Data models for Jama CLI."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -77,9 +78,7 @@ class JamaConfig(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     default_profile: str = Field(default="default", description="Default profile name")
-    profiles: dict[str, JamaProfile] = Field(
-        default_factory=dict, description="Named profiles"
-    )
+    profiles: dict[str, JamaProfile] = Field(default_factory=dict, description="Named profiles")
 
     # Default output settings
     output_format: Literal["table", "json", "csv", "yaml"] = Field(

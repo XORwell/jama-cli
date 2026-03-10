@@ -227,7 +227,10 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_item_type(self, server_with_client):
         """Test get_item_type tool."""
-        server_with_client.jama_client.get_item_type.return_value = {"id": 33, "display": "Requirement"}
+        server_with_client.jama_client.get_item_type.return_value = {
+            "id": 33,
+            "display": "Requirement",
+        }
         result = await server_with_client._execute_tool("get_item_type", {"item_type_id": 33})
         assert result["display"] == "Requirement"
 
@@ -301,7 +304,10 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_attachment(self, server_with_client):
         """Test get_attachment tool."""
-        server_with_client.jama_client.get_attachment.return_value = {"id": 1, "fileName": "test.txt"}
+        server_with_client.jama_client.get_attachment.return_value = {
+            "id": 1,
+            "fileName": "test.txt",
+        }
         result = await server_with_client._execute_tool("get_attachment", {"attachment_id": 1})
         assert result["fileName"] == "test.txt"
 

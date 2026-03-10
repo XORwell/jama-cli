@@ -1,4 +1,5 @@
 """Console output utilities using Rich."""
+
 from __future__ import annotations
 
 import sys

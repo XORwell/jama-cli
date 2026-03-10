@@ -2,6 +2,7 @@
 Configuration loader for Jama MCP Server.
 Supports both .env files and YAML config files with multi-server definitions.
 """
+
 from __future__ import annotations
 
 import os

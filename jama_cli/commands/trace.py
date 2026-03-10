@@ -1,4 +1,5 @@
 """Traceability commands for requirements coverage analysis."""
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -111,14 +112,18 @@ def trace_matrix(
             print_error("No items found in project")
             raise typer.Exit(1)
 
-        console.print(f"  [dim]Analyzing {len(items)} items with {len(relationship_map)} relationship entries[/dim]")
+        console.print(
+            f"  [dim]Analyzing {len(items)} items with {len(relationship_map)} relationship entries[/dim]"
+        )
 
         # Build item lookup
         item_map: dict[int, dict[str, Any]] = {item["id"]: item for item in items}
 
         # Get item types for display
         item_types_list = client.get_item_types()
-        item_types: dict[int, str] = {t["id"]: t.get("display", t.get("name", "")) for t in item_types_list}
+        item_types: dict[int, str] = {
+            t["id"]: t.get("display", t.get("name", "")) for t in item_types_list
+        }
 
         # Filter by type if specified
         source_items = items
@@ -159,28 +164,32 @@ def trace_matrix(
 
                 if downstream:
                     for target in downstream:
-                        trace_data.append({
+                        trace_data.append(
+                            {
+                                "source_id": item_id,
+                                "source_key": item.get("documentKey", ""),
+                                "source_name": _get_item_name(item),
+                                "source_type": _get_item_type_name(item, item_types),
+                                "target_id": target.get("id"),
+                                "target_key": target.get("documentKey", ""),
+                                "target_name": _get_item_name(target),
+                                "target_type": _get_item_type_name(target, item_types),
+                            }
+                        )
+                else:
+                    # No downstream relationships - untraced item
+                    trace_data.append(
+                        {
                             "source_id": item_id,
                             "source_key": item.get("documentKey", ""),
                             "source_name": _get_item_name(item),
                             "source_type": _get_item_type_name(item, item_types),
-                            "target_id": target.get("id"),
-                            "target_key": target.get("documentKey", ""),
-                            "target_name": _get_item_name(target),
-                            "target_type": _get_item_type_name(target, item_types),
-                        })
-                else:
-                    # No downstream relationships - untraced item
-                    trace_data.append({
-                        "source_id": item_id,
-                        "source_key": item.get("documentKey", ""),
-                        "source_name": _get_item_name(item),
-                        "source_type": _get_item_type_name(item, item_types),
-                        "target_id": None,
-                        "target_key": "",
-                        "target_name": "(no coverage)",
-                        "target_type": "",
-                    })
+                            "target_id": None,
+                            "target_key": "",
+                            "target_name": "(no coverage)",
+                            "target_type": "",
+                        }
+                    )
 
                 progress.advance(task)
 
@@ -214,9 +223,13 @@ def trace_matrix(
 
             console.print(table)
             console.print()
-            console.print(f"[bold]Coverage:[/bold] {traced_sources}/{total_sources} ({coverage_pct:.1f}%)")
+            console.print(
+                f"[bold]Coverage:[/bold] {traced_sources}/{total_sources} ({coverage_pct:.1f}%)"
+            )
             if traced_sources < total_sources:
-                console.print(f"[yellow]Warning:[/yellow] {total_sources - traced_sources} items have no downstream traces")
+                console.print(
+                    f"[yellow]Warning:[/yellow] {total_sources - traced_sources} items have no downstream traces"
+                )
             if not refresh:
                 console.print("[dim]Using cached data. Use --refresh for fresh data.[/dim]")
         else:
@@ -287,14 +300,18 @@ def trace_coverage(
 
         # Get item types for display
         item_types_list = client.get_item_types()
-        item_types: dict[int, str] = {t["id"]: t.get("display", t.get("name", "")) for t in item_types_list}
+        item_types: dict[int, str] = {
+            t["id"]: t.get("display", t.get("name", "")) for t in item_types_list
+        }
 
         # Analyze coverage per type using the pre-built map (no additional API calls!)
-        coverage_by_type: dict[int, dict[str, int]] = defaultdict(lambda: {
-            "total": 0,
-            "has_upstream": 0,
-            "has_downstream": 0,
-        })
+        coverage_by_type: dict[int, dict[str, int]] = defaultdict(
+            lambda: {
+                "total": 0,
+                "has_upstream": 0,
+                "has_downstream": 0,
+            }
+        )
 
         with Progress(
             SpinnerColumn(),
@@ -328,15 +345,17 @@ def trace_coverage(
             upstream_pct = (stats["has_upstream"] / total * 100) if total > 0 else 0
             downstream_pct = (stats["has_downstream"] / total * 100) if total > 0 else 0
 
-            coverage_data.append({
-                "type_id": type_id,
-                "type_name": item_types.get(type_id, f"Type {type_id}"),
-                "total_items": total,
-                "has_upstream": stats["has_upstream"],
-                "upstream_pct": f"{upstream_pct:.1f}%",
-                "has_downstream": stats["has_downstream"],
-                "downstream_pct": f"{downstream_pct:.1f}%",
-            })
+            coverage_data.append(
+                {
+                    "type_id": type_id,
+                    "type_name": item_types.get(type_id, f"Type {type_id}"),
+                    "total_items": total,
+                    "has_upstream": stats["has_upstream"],
+                    "upstream_pct": f"{upstream_pct:.1f}%",
+                    "has_downstream": stats["has_downstream"],
+                    "downstream_pct": f"{downstream_pct:.1f}%",
+                }
+            )
 
         if output_format == OutputFormat.TABLE:
             table = Table(title=f"Coverage Summary - Project {project_id}")
@@ -404,13 +423,19 @@ def trace_tree(
 
         # Get item types for display
         item_types_list = client.get_item_types()
-        item_types: dict[int, str] = {t["id"]: t.get("display", t.get("name", "")) for t in item_types_list}
+        item_types: dict[int, str] = {
+            t["id"]: t.get("display", t.get("name", "")) for t in item_types_list
+        }
 
-        tree = Tree(f"[bold cyan]{root_name}[/bold cyan] ({_get_item_type_name(root_item, item_types)})")
+        tree = Tree(
+            f"[bold cyan]{root_name}[/bold cyan] ({_get_item_type_name(root_item, item_types)})"
+        )
 
         visited: set[int] = {item_id}
 
-        def add_branch(parent_tree: Tree, item_id: int, dir_label: str, get_related, current_depth: int) -> None:
+        def add_branch(
+            parent_tree: Tree, item_id: int, dir_label: str, get_related, current_depth: int
+        ) -> None:
             if current_depth >= depth:
                 return
 

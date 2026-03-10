@@ -1,4 +1,5 @@
 """Output formatters for different output formats."""
+
 from __future__ import annotations
 
 import csv

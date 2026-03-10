@@ -446,7 +446,8 @@ class TestReadOperations:
         server.jama_client = mock_instance
 
         request = MCPRequest(
-            prompt="get relationship", parameters={"intent": "get_relationship", "relationship_id": 1}
+            prompt="get relationship",
+            parameters={"intent": "get_relationship", "relationship_id": 1},
         )
         response = await server.handle_request(request)
 
@@ -569,9 +570,7 @@ class TestReadOperations:
         server = JamaMCPServer(jama_config)
         server.jama_client = mock_instance
 
-        request = MCPRequest(
-            prompt="get tags", parameters={"intent": "get_tags", "project_id": 10}
-        )
+        request = MCPRequest(prompt="get tags", parameters={"intent": "get_tags", "project_id": 10})
         response = await server.handle_request(request)
 
         response_data = json.loads(response.response)

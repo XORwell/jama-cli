@@ -4,6 +4,7 @@ Stdio-based MCP server implementation for Jama integration.
 This implementation uses the MCP protocol's stdio transport for native MCP client
 compatibility with Claude Desktop, Cline, VS Code, and other MCP clients.
 """
+
 from __future__ import annotations
 
 import asyncio

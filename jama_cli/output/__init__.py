@@ -1,4 +1,5 @@
 """Output formatting utilities."""
+
 from __future__ import annotations
 
 from jama_cli.output.console import (

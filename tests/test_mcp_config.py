@@ -60,11 +60,15 @@ class TestLoadEnvConfig:
 
     def test_load_from_env(self):
         """Test loading config from environment variables."""
-        with patch.dict(os.environ, {
-            "JAMA_URL": "https://env.jamacloud.com",
-            "JAMA_CLIENT_ID": "envclient",
-            "JAMA_CLIENT_SECRET": "envsecret",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "JAMA_URL": "https://env.jamacloud.com",
+                "JAMA_CLIENT_ID": "envclient",
+                "JAMA_CLIENT_SECRET": "envsecret",
+            },
+            clear=True,
+        ):
             config = load_env_config()
             assert config is not None
             assert config.url == "https://env.jamacloud.com"
@@ -136,9 +140,13 @@ servers:
 
     def test_load_config_fallback_to_env(self):
         """Test load_config falls back to env."""
-        with patch.dict(os.environ, {
-            "JAMA_URL": "https://env.jamacloud.com",
-        }, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "JAMA_URL": "https://env.jamacloud.com",
+            },
+            clear=True,
+        ):
             # No YAML config, should use env
             config = load_config(config_file="/nonexistent/config.yml")
             if config:

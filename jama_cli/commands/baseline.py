@@ -1,4 +1,5 @@
 """Baseline management and comparison commands."""
+
 from __future__ import annotations
 
 from typing import Annotated, Any
@@ -57,12 +58,14 @@ def list_baselines(
         # Simplify for display
         display_data = []
         for b in baselines:
-            display_data.append({
-                "id": b.get("id"),
-                "name": b.get("name", ""),
-                "description": b.get("description", "")[:50] if b.get("description") else "",
-                "created": b.get("createdDate", "")[:10] if b.get("createdDate") else "",
-            })
+            display_data.append(
+                {
+                    "id": b.get("id"),
+                    "name": b.get("name", ""),
+                    "description": b.get("description", "")[:50] if b.get("description") else "",
+                    "created": b.get("createdDate", "")[:10] if b.get("createdDate") else "",
+                }
+            )
 
         format_output(display_data, output_format, title=f"Baselines - Project {project_id}")
 
@@ -130,13 +133,15 @@ def baseline_items(
         # Simplify for display
         display_data = []
         for item in items:
-            display_data.append({
-                "id": item.get("id"),
-                "documentKey": item.get("documentKey", ""),
-                "name": _get_item_name(item),
-                "version": item.get("version", ""),
-                "type": item.get("itemType", ""),
-            })
+            display_data.append(
+                {
+                    "id": item.get("id"),
+                    "documentKey": item.get("documentKey", ""),
+                    "name": _get_item_name(item),
+                    "version": item.get("version", ""),
+                    "type": item.get("itemType", ""),
+                }
+            )
 
         format_output(display_data, output_format, title=f"Items in Baseline {baseline_id}")
 
@@ -200,26 +205,30 @@ def diff_baselines(
         # Added items (in baseline2 but not in baseline1)
         for item_id, item in items2_map.items():
             if item_id not in items1_map:
-                diff_data.append({
-                    "change": "Added",
-                    "id": item_id,
-                    "documentKey": item.get("documentKey", ""),
-                    "name": _get_item_name(item),
-                    "old_version": "-",
-                    "new_version": item.get("version", ""),
-                })
+                diff_data.append(
+                    {
+                        "change": "Added",
+                        "id": item_id,
+                        "documentKey": item.get("documentKey", ""),
+                        "name": _get_item_name(item),
+                        "old_version": "-",
+                        "new_version": item.get("version", ""),
+                    }
+                )
 
         # Removed items (in baseline1 but not in baseline2)
         for item_id, item in items1_map.items():
             if item_id not in items2_map:
-                diff_data.append({
-                    "change": "Removed",
-                    "id": item_id,
-                    "documentKey": item.get("documentKey", ""),
-                    "name": _get_item_name(item),
-                    "old_version": item.get("version", ""),
-                    "new_version": "-",
-                })
+                diff_data.append(
+                    {
+                        "change": "Removed",
+                        "id": item_id,
+                        "documentKey": item.get("documentKey", ""),
+                        "name": _get_item_name(item),
+                        "old_version": item.get("version", ""),
+                        "new_version": "-",
+                    }
+                )
 
         # Modified items (version changed)
         for item_id, item2 in items2_map.items():
@@ -228,14 +237,16 @@ def diff_baselines(
                 v1 = item1.get("version")
                 v2 = item2.get("version")
                 if v1 != v2:
-                    diff_data.append({
-                        "change": "Modified",
-                        "id": item_id,
-                        "documentKey": item2.get("documentKey", ""),
-                        "name": _get_item_name(item2),
-                        "old_version": v1,
-                        "new_version": v2,
-                    })
+                    diff_data.append(
+                        {
+                            "change": "Modified",
+                            "id": item_id,
+                            "documentKey": item2.get("documentKey", ""),
+                            "name": _get_item_name(item2),
+                            "old_version": v1,
+                            "new_version": v2,
+                        }
+                    )
 
         if not diff_data:
             print_success("Baselines are identical")
@@ -246,7 +257,9 @@ def diff_baselines(
         diff_data.sort(key=lambda x: (change_order.get(x["change"], 3), x.get("documentKey", "")))
 
         if output_format == OutputFormat.TABLE:
-            table = Table(title=f"Baseline Diff: {baseline1.get('name', baseline1_id)} → {baseline2.get('name', baseline2_id)}")
+            table = Table(
+                title=f"Baseline Diff: {baseline1.get('name', baseline1_id)} → {baseline2.get('name', baseline2_id)}"
+            )
             table.add_column("Change", style="bold")
             table.add_column("Key")
             table.add_column("Name")
@@ -280,7 +293,9 @@ def diff_baselines(
             added = len([d for d in diff_data if d["change"] == "Added"])
             removed = len([d for d in diff_data if d["change"] == "Removed"])
             modified = len([d for d in diff_data if d["change"] == "Modified"])
-            console.print(f"[green]+{added} added[/green], [yellow]~{modified} modified[/yellow], [red]-{removed} removed[/red]")
+            console.print(
+                f"[green]+{added} added[/green], [yellow]~{modified} modified[/yellow], [red]-{removed} removed[/red]"
+            )
         else:
             format_output(diff_data, output_format)
 

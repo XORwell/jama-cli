@@ -1,4 +1,5 @@
 """Items commands."""
+
 from __future__ import annotations
 
 import json
@@ -58,7 +59,9 @@ def list_items(
     Use --limit 0 to fetch all items (slower for large projects).
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -76,7 +79,9 @@ def list_items(
             console.print(f"[dim]Showing first {limit} items. Use --limit 0 for all.[/dim]")
 
         # Parse fields
-        columns = fields.split(",") if fields else ["id", "documentKey", "name", "itemType", "status"]
+        columns = (
+            fields.split(",") if fields else ["id", "documentKey", "name", "itemType", "status"]
+        )
 
         # Flatten items for display (merge fields dict into top level)
         display_items = _flatten_items(items)
@@ -108,7 +113,9 @@ def get_item(
     Tip: Find API ID with 'jama items list <project>' or in Jama URL after /items/
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -140,7 +147,9 @@ def get_children(
 ) -> None:
     """Get children of an item."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")
@@ -188,7 +197,9 @@ def create_item(
 ) -> None:
     """Create a new item."""
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
-    output_format: OutputFormat = ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    output_format: OutputFormat = (
+        ctx.obj.get("output", OutputFormat.TABLE) if ctx.obj else OutputFormat.TABLE
+    )
 
     if not profile:
         print_error("No profile configured. Run 'jama config init' to set up.")

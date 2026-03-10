@@ -1,4 +1,5 @@
 """Configuration management commands."""
+
 from __future__ import annotations
 
 from typing import Annotated
@@ -298,6 +299,7 @@ def cache_info(
         # Also clear disk cache directory
         if CACHE_DIR.exists():
             import shutil
+
             shutil.rmtree(CACHE_DIR, ignore_errors=True)
         print_success("All caches cleared (memory + disk)")
         return
@@ -387,4 +389,6 @@ def cache_info(
     else:
         console.print("  [dim]No disk cache yet[/dim]")
 
-    console.print("\n[dim]Tip: Use --clear to clear caches, or --refresh on commands to bypass cache[/dim]")
+    console.print(
+        "\n[dim]Tip: Use --clear to clear caches, or --refresh on commands to bypass cache[/dim]"
+    )
