@@ -289,7 +289,6 @@ class TestRelationshipsCommand:
 
     def test_relationships_create_and_delete(self, test_project_id: int) -> None:
         """Test creating and deleting a relationship."""
-        import re
         import time
 
         # Create two test items with unique names

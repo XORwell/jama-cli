@@ -1,8 +1,5 @@
 """Unit tests for main CLI application."""
 
-from unittest.mock import patch
-
-import pytest
 from typer.testing import CliRunner
 
 from jama_cli.main import app

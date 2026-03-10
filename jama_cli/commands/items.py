@@ -53,7 +53,7 @@ def list_items(
     ] = 50,
 ) -> None:
     """List items in a project.
-    
+
     By default returns first 50 items for fast response.
     Use --limit 0 to fetch all items (slower for large projects).
     """
@@ -66,7 +66,7 @@ def list_items(
 
     try:
         client = JamaClient(profile)
-        
+
         # Use max_results for server-side limiting (much faster)
         max_results = limit if limit > 0 else None
         items = client.get_items(project_id, item_type=item_type, max_results=max_results)
@@ -99,12 +99,12 @@ def get_item(
     item_id: Annotated[int, typer.Argument(help="Item API ID (numeric, shown in 'id' column)")],
 ) -> None:
     """Get details of a specific item.
-    
+
     Use the numeric API ID (from 'items list' output), not the Global ID.
-    
+
     Examples:
         jama items get 1241247    # Using API ID
-    
+
     Tip: Find API ID with 'jama items list <project>' or in Jama URL after /items/
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)

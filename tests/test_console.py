@@ -1,18 +1,16 @@
 """Unit tests for console output utilities."""
 
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 from jama_cli.output.console import (
+    confirm,
     console,
     error_console,
+    is_interactive,
     print_error,
+    print_info,
     print_success,
     print_warning,
-    print_info,
-    confirm,
-    is_interactive,
 )
 
 # Patch targets: patch where the objects are used, not where they're defined.

@@ -7,7 +7,6 @@ from typing import Annotated, Any
 import typer
 from rich.console import Console
 from rich.table import Table
-from rich.syntax import Syntax
 
 from jama_cli.config import get_profile_or_env
 from jama_cli.core.client import JamaClient
@@ -36,7 +35,7 @@ def list_versions(
     ] = OutputFormat.TABLE,
 ) -> None:
     """List all versions of an item.
-    
+
     Examples:
         jama history list 12345
         jama history list 12345 --format json
@@ -49,11 +48,11 @@ def list_versions(
     try:
         client = JamaClient(profile)
         versions = client.get_item_versions(item_id)
-        
+
         if not versions:
             print_info("No version history found")
             return
-        
+
         # Simplify for display
         display_data = []
         for v in versions:
@@ -64,12 +63,12 @@ def list_versions(
                 "createdBy": v.get("createdBy", {}).get("username", "") if isinstance(v.get("createdBy"), dict) else "",
                 "comment": v.get("comment", "")[:50] if v.get("comment") else "",
             })
-        
+
         # Sort by version descending
         display_data.sort(key=lambda x: x.get("version", 0), reverse=True)
-        
+
         format_output(display_data, output_format, title=f"Version History - Item {item_id}")
-        
+
     except Exception as e:
         print_error(f"Failed to get version history: {e}")
         raise typer.Exit(1) from e
@@ -86,7 +85,7 @@ def get_version(
     ] = OutputFormat.TABLE,
 ) -> None:
     """Get a specific version of an item.
-    
+
     Examples:
         jama history get 12345 3
         jama history get 12345 1 --format json
@@ -100,7 +99,7 @@ def get_version(
         client = JamaClient(profile)
         version_data = client.get_item_version(item_id, version)
         format_output(version_data, output_format, title=f"Item {item_id} - Version {version}")
-        
+
     except Exception as e:
         print_error(f"Failed to get version: {e}")
         raise typer.Exit(1) from e
@@ -118,7 +117,7 @@ def diff_versions(
     ] = True,
 ) -> None:
     """Compare two versions of an item and show differences.
-    
+
     Examples:
         jama history diff 12345 1 3
         jama history diff 12345 1 3 --no-fields-only
@@ -130,31 +129,31 @@ def diff_versions(
 
     try:
         client = JamaClient(profile)
-        
+
         print_info(f"Comparing item {item_id}: version {version1} → version {version2}")
-        
+
         v1_data = client.get_item_version(item_id, version1)
         v2_data = client.get_item_version(item_id, version2)
-        
+
         # Extract the versioned item data
         v1_item = v1_data.get("versionedItem", v1_data)
         v2_item = v2_data.get("versionedItem", v2_data)
-        
+
         if fields_only:
             v1_fields = v1_item.get("fields", {})
             v2_fields = v2_item.get("fields", {})
         else:
             v1_fields = v1_item
             v2_fields = v2_item
-        
+
         # Find differences
         all_keys = set(v1_fields.keys()) | set(v2_fields.keys())
-        
+
         diff_data = []
         for key in sorted(all_keys):
             v1_val = v1_fields.get(key)
             v2_val = v2_fields.get(key)
-            
+
             if v1_val != v2_val:
                 diff_data.append({
                     "field": key,
@@ -162,18 +161,18 @@ def diff_versions(
                     "new_value": _format_value(v2_val),
                     "change": _get_change_type(v1_val, v2_val),
                 })
-        
+
         if not diff_data:
             print_info("No differences found between versions")
             return
-        
+
         # Display as table
         table = Table(title=f"Version Diff: {version1} → {version2}")
         table.add_column("Field", style="cyan")
         table.add_column("Change", style="bold")
         table.add_column("Old Value")
         table.add_column("New Value")
-        
+
         for row in diff_data:
             change = row["change"]
             if change == "added":
@@ -182,17 +181,17 @@ def diff_versions(
                 style = "red"
             else:
                 style = "yellow"
-            
+
             table.add_row(
                 row["field"],
                 f"[{style}]{change}[/{style}]",
                 _truncate(row["old_value"], 40),
                 _truncate(row["new_value"], 40),
             )
-        
+
         console.print(table)
         console.print(f"\n[dim]{len(diff_data)} field(s) changed[/dim]")
-        
+
     except Exception as e:
         print_error(f"Version diff failed: {e}")
         raise typer.Exit(1) from e

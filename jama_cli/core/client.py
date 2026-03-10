@@ -1,6 +1,7 @@
 """Jama API client wrapper for CLI operations."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -39,7 +40,7 @@ class CacheEntry:
 
 class DiskCache:
     """Persistent disk cache with TTL support.
-    
+
     Stores cached data on disk so it persists between CLI invocations.
     Useful for large datasets like project items and relationships.
     """
@@ -62,16 +63,16 @@ class DiskCache:
         if not path.exists():
             self._misses += 1
             return None
-        
+
         try:
             with open(path) as f:
                 data = json.load(f)
-            
+
             if time.time() > data.get("expires_at", 0):
                 path.unlink(missing_ok=True)
                 self._misses += 1
                 return None
-            
+
             self._hits += 1
             return data.get("value")
         except (json.JSONDecodeError, OSError):
@@ -223,12 +224,12 @@ class JamaClient:
         self.profile = profile
         self._client: PyJamaClient | None = None
         self._cache = Cache()
-        
+
         # Disk cache for large datasets (persists between CLI runs)
         # Namespace by host to avoid cache collisions between instances
         host_hash = hashlib.sha256(profile.url.encode()).hexdigest()[:8]
         self._disk_cache = DiskCache(namespace=host_hash) if use_disk_cache else None
-        
+
         # Cached relationship maps for bulk operations
         self._relationship_map: dict[int, dict[str, list[dict[str, Any]]]] | None = None
         self._relationship_map_project: int | None = None
@@ -291,35 +292,35 @@ class JamaClient:
         use_cache: bool = True,
     ) -> list[dict[str, Any]]:
         """Get ALL relationships in a project in a single API call.
-        
+
         This is much faster than fetching relationships per-item when you need
         to analyze many items. Results are cached to disk for reuse.
-        
+
         Args:
             project_id: Project ID
             use_cache: Whether to use disk cache (default True)
-        
+
         Returns:
             List of all relationships in the project
         """
         cache_key = f"relationships_bulk:{project_id}"
-        
+
         # Try disk cache first
         if use_cache and self._disk_cache:
             cached = self._disk_cache.get(cache_key)
             if cached is not None:
                 logger.debug(f"Disk cache hit: {len(cached)} relationships for project {project_id}")
                 return cached
-        
+
         # Fetch from API
         client = self._ensure_connected()
         relationships = client.get_relationships(project_id)
-        
+
         # Cache to disk
         if self._disk_cache:
             self._disk_cache.set(cache_key, relationships, self.CACHE_TTL_RELATIONSHIPS)
             logger.debug(f"Cached {len(relationships)} relationships to disk")
-        
+
         return relationships
 
     def build_relationship_map(
@@ -328,14 +329,14 @@ class JamaClient:
         use_cache: bool = True,
     ) -> dict[int, dict[str, list[dict[str, Any]]]]:
         """Build a lookup map of relationships by item ID.
-        
+
         This allows O(1) lookups for upstream/downstream relationships
         instead of making an API call per item.
-        
+
         Args:
             project_id: Project ID
             use_cache: Whether to use cached relationships
-            
+
         Returns:
             Dict mapping item_id -> {"upstream": [...], "downstream": [...]}
         """
@@ -345,32 +346,32 @@ class JamaClient:
             and self._relationship_map_project == project_id
         ):
             return self._relationship_map
-        
+
         relationships = self.get_project_relationships_bulk(project_id, use_cache)
-        
+
         # Build the map
         rel_map: dict[int, dict[str, list[dict[str, Any]]]] = {}
-        
+
         for rel in relationships:
             from_item = rel.get("fromItem")
             to_item = rel.get("toItem")
-            
+
             # Add to downstream of fromItem
             if from_item:
                 if from_item not in rel_map:
                     rel_map[from_item] = {"upstream": [], "downstream": []}
                 rel_map[from_item]["downstream"].append(rel)
-            
+
             # Add to upstream of toItem
             if to_item:
                 if to_item not in rel_map:
                     rel_map[to_item] = {"upstream": [], "downstream": []}
                 rel_map[to_item]["upstream"].append(rel)
-        
+
         self._relationship_map = rel_map
         self._relationship_map_project = project_id
         logger.debug(f"Built relationship map for {len(rel_map)} items")
-        
+
         return rel_map
 
     def get_items_bulk(
@@ -380,19 +381,19 @@ class JamaClient:
         use_cache: bool = True,
     ) -> list[dict[str, Any]]:
         """Get all items in a project with disk caching.
-        
+
         Caches results to disk so subsequent CLI runs are much faster.
-        
+
         Args:
             project_id: Project ID
             item_type: Optional item type filter (applied after fetch)
             use_cache: Whether to use disk cache
-            
+
         Returns:
             List of items
         """
         cache_key = f"items_bulk:{project_id}"
-        
+
         # Try disk cache first
         if use_cache and self._disk_cache:
             cached = self._disk_cache.get(cache_key)
@@ -402,19 +403,19 @@ class JamaClient:
                 if item_type:
                     items = [i for i in items if i.get("itemType") == item_type]
                 return items
-        
+
         # Fetch from API
         client = self._ensure_connected()
         items = client.get_items(project_id)
-        
+
         # Cache to disk (without type filter, so cache works for all types)
         if self._disk_cache:
             self._disk_cache.set(cache_key, items, self.CACHE_TTL_ITEMS)
             logger.debug(f"Cached {len(items)} items to disk")
-        
+
         if item_type:
             items = [i for i in items if i.get("itemType") == item_type]
-        
+
         return items
 
     def get_downstream_related_bulk(
@@ -424,33 +425,31 @@ class JamaClient:
         relationship_map: dict[int, dict[str, list[dict[str, Any]]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Get downstream related items using bulk relationship map.
-        
+
         Much faster than get_item_downstream_related() when analyzing
         multiple items - uses pre-fetched relationship data.
-        
+
         Args:
             item_id: Item ID to get downstream for
             project_id: Project ID (for building map if needed)
             relationship_map: Pre-built map (or will build one)
-            
+
         Returns:
             List of downstream related items
         """
         if relationship_map is None:
             relationship_map = self.build_relationship_map(project_id)
-        
+
         item_rels = relationship_map.get(item_id, {"downstream": []})
         downstream_ids = [rel.get("toItem") for rel in item_rels["downstream"]]
-        
+
         # Fetch item details for downstream items
         items = []
         for to_id in downstream_ids:
             if to_id:
-                try:
+                with contextlib.suppress(Exception):
                     items.append(self.get_item(to_id))
-                except Exception:
-                    pass  # Skip items we can't access
-        
+
         return items
 
     def get_upstream_related_bulk(
@@ -460,29 +459,27 @@ class JamaClient:
         relationship_map: dict[int, dict[str, list[dict[str, Any]]]] | None = None,
     ) -> list[dict[str, Any]]:
         """Get upstream related items using bulk relationship map.
-        
+
         Args:
             item_id: Item ID to get upstream for
             project_id: Project ID (for building map if needed)
             relationship_map: Pre-built map (or will build one)
-            
+
         Returns:
             List of upstream related items
         """
         if relationship_map is None:
             relationship_map = self.build_relationship_map(project_id)
-        
+
         item_rels = relationship_map.get(item_id, {"upstream": []})
         upstream_ids = [rel.get("fromItem") for rel in item_rels["upstream"]]
-        
+
         items = []
         for from_id in upstream_ids:
             if from_id:
-                try:
+                with contextlib.suppress(Exception):
                     items.append(self.get_item(from_id))
-                except Exception:
-                    pass
-        
+
         return items
 
     def get_items_parallel(
@@ -491,28 +488,28 @@ class JamaClient:
         max_workers: int = 10,
     ) -> list[dict[str, Any]]:
         """Fetch multiple items in parallel.
-        
+
         Args:
             item_ids: List of item IDs to fetch
             max_workers: Maximum parallel requests (default 10)
-            
+
         Returns:
             List of items (in same order as input IDs, None for failed fetches)
         """
         results: dict[int, dict[str, Any] | None] = {}
-        
+
         def fetch_item(item_id: int) -> tuple[int, dict[str, Any] | None]:
             try:
                 return item_id, self.get_item(item_id)
             except Exception:
                 return item_id, None
-        
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(fetch_item, iid): iid for iid in item_ids}
             for future in as_completed(futures):
                 item_id, item = future.result()
                 results[item_id] = item
-        
+
         return [results.get(iid) for iid in item_ids if results.get(iid) is not None]
 
     def analyze_traceability_fast(
@@ -523,49 +520,49 @@ class JamaClient:
         progress_callback: Callable[[int, int], None] | None = None,
     ) -> list[dict[str, Any]]:
         """Analyze traceability for a project using bulk operations.
-        
+
         This is MUCH faster than the per-item approach:
         - 2 API calls (items + relationships) instead of N+1
         - Uses disk cache for subsequent runs
-        
+
         Args:
             project_id: Project ID
             source_type: Optional source item type filter
             target_type: Optional target item type filter
             progress_callback: Optional callback(current, total) for progress
-            
+
         Returns:
             List of trace data dicts
         """
         # Fetch all data in bulk (2 API calls, cached)
         items = self.get_items_bulk(project_id)
         relationship_map = self.build_relationship_map(project_id)
-        
+
         # Build item lookup
         item_map = {item["id"]: item for item in items}
-        
+
         # Filter source items
         source_items = items
         if source_type:
             source_items = [i for i in items if i.get("itemType") == source_type]
-        
+
         trace_data = []
         total = len(source_items)
-        
+
         for idx, item in enumerate(source_items):
             item_id = item["id"]
-            
+
             # Get downstream from map (no API call!)
             item_rels = relationship_map.get(item_id, {"downstream": []})
             downstream_ids = [rel.get("toItem") for rel in item_rels["downstream"]]
-            
+
             # Filter by target type
             if target_type:
                 downstream_ids = [
                     tid for tid in downstream_ids
                     if item_map.get(tid, {}).get("itemType") == target_type
                 ]
-            
+
             if downstream_ids:
                 for target_id in downstream_ids:
                     target = item_map.get(target_id, {})
@@ -590,10 +587,10 @@ class JamaClient:
                     "target_name": "(no coverage)",
                     "target_type": None,
                 })
-            
+
             if progress_callback:
                 progress_callback(idx + 1, total)
-        
+
         return trace_data
 
     # =========================================================================
@@ -634,19 +631,19 @@ class JamaClient:
             max_results: Maximum number of items to return (for faster queries)
         """
         client = self._ensure_connected()
-        
+
         if max_results and max_results <= 50:
             # Use single page fetch for small limits (much faster)
             items = self._get_items_page(project_id, start_at=0, max_results=max_results)
         else:
             items = client.get_items(project_id)
-        
+
         if item_type:
             items = [item for item in items if item.get("itemType") == item_type]
-        
+
         if max_results and len(items) > max_results:
             items = items[:max_results]
-        
+
         return items
 
     def _get_items_page(
@@ -656,7 +653,7 @@ class JamaClient:
         max_results: int = 50,
     ) -> list[dict[str, Any]]:
         """Get a single page of items (faster than fetching all).
-        
+
         Args:
             project_id: Project ID
             start_at: Starting index
@@ -914,8 +911,6 @@ class JamaClient:
         Note: The py-jama-rest-client doesn't have a direct download method,
         so this gets the attachment URL and downloads via the file URL.
         """
-        import requests
-
         client = self._ensure_connected()
         attachment = client.get_attachment(attachment_id)
 

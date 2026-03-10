@@ -4,12 +4,12 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 import typer
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 from jama_cli.config import get_profile_or_env, load_config
 from jama_cli.core.client import JamaClient
-from jama_cli.output import OutputFormat, console, format_output, print_error, print_warning
+from jama_cli.output import console, print_error
 
 app = typer.Typer(name="diff", help="Compare items between projects or instances")
 
@@ -106,7 +106,7 @@ def diff_projects(
             task1 = progress.add_task(f"Fetching source project {source_project}...", total=None)
             source_items = source_client.get_items(source_project, item_type=item_type)
             progress.update(task1, completed=True, description=f"Source: {len(source_items)} items")
-            
+
             task2 = progress.add_task(f"Fetching target project {target_project}...", total=None)
             target_items = target_client.get_items(target_project, item_type=item_type)
             progress.update(task2, completed=True, description=f"Target: {len(target_items)} items")

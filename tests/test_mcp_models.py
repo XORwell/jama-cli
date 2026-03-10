@@ -4,14 +4,14 @@ import pytest
 from pydantic import ValidationError
 
 from jama_mcp_server.models import (
-    JamaConfig,
-    MultiServerConfig,
-    MCPRequest,
-    MCPResponse,
-    HealthCheckResponse,
     BatchRequest,
     BatchResponse,
     ErrorResponse,
+    HealthCheckResponse,
+    JamaConfig,
+    MCPRequest,
+    MCPResponse,
+    MultiServerConfig,
 )
 
 

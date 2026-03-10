@@ -1,8 +1,6 @@
 """Comprehensive tests for stdio MCP server to achieve 100% coverage."""
 
-import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 

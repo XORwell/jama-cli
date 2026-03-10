@@ -1,11 +1,6 @@
 """Unit tests for stdio MCP server."""
 
-import asyncio
 import json
-from io import StringIO
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from jama_mcp_server.core.stdio_server import JamaStdioMCPServer
 from jama_mcp_server.models import JamaConfig
@@ -21,7 +16,7 @@ class TestJamaStdioMCPServer:
             client_id="client",
             client_secret="secret",
         )
-        
+
         server = JamaStdioMCPServer(config)
         assert server is not None
         assert server.config == config
@@ -33,7 +28,7 @@ class TestJamaStdioMCPServer:
             client_id="client",
             client_secret="secret",
         )
-        
+
         server = JamaStdioMCPServer(config)
         assert server.mcp is not None
 
@@ -49,7 +44,7 @@ class TestStdioProtocol:
             "method": "test",
             "params": {},
         })
-        
+
         parsed = json.loads(message)
         assert parsed["jsonrpc"] == "2.0"
         assert parsed["id"] == 1
@@ -61,7 +56,7 @@ class TestStdioProtocol:
             "id": 1,
             "result": {"test": "value"},
         }
-        
+
         formatted = json.dumps(response)
         parsed = json.loads(formatted)
         assert parsed["result"]["test"] == "value"
@@ -76,7 +71,7 @@ class TestStdioProtocol:
                 "message": "Invalid Request",
             },
         }
-        
+
         formatted = json.dumps(response)
         parsed = json.loads(formatted)
         assert parsed["error"]["code"] == -32600

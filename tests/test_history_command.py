@@ -2,10 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
-from jama_cli.commands.history import app, _format_value, _truncate, _get_change_type
+from jama_cli.commands.history import _format_value, _get_change_type, _truncate, app
 
 runner = CliRunner()
 

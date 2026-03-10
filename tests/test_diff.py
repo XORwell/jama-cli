@@ -1,7 +1,5 @@
 """Tests for the diff module."""
 
-import pytest
-
 from jama_cli.commands.diff import (
     _build_item_map,
     _calculate_diff,

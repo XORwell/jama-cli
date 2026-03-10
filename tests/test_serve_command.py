@@ -1,11 +1,10 @@
 """Unit tests for serve command."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
-from jama_cli.commands.serve import app, _get_pid, _write_pid, _remove_pid
+from jama_cli.commands.serve import _get_pid, _remove_pid, _write_pid, app
 
 runner = CliRunner()
 

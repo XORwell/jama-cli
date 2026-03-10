@@ -5,13 +5,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from jama_mcp_server.config import (
+    list_servers,
     load_config,
     load_env_config,
     load_yaml_config,
-    list_servers,
 )
 from jama_mcp_server.models import JamaConfig, MultiServerConfig
 

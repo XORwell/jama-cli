@@ -3,19 +3,17 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from jama_cli.config import (
-    get_profile_or_env,
+    _expand_env_vars,
+    get_config_path,
     get_profile,
+    get_profile_or_env,
     load_config,
     save_config,
-    get_config_path,
-    _expand_env_vars,
 )
-from jama_cli.models import JamaProfile, JamaConfig
+from jama_cli.models import JamaConfig, JamaProfile
 
 
 class TestJamaProfile:
@@ -148,8 +146,7 @@ class TestGetConfigPath:
 
     def test_get_config_path_default(self):
         """Test get_config_path returns default."""
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("jama_cli.config.CONFIG_FILE") as mock_config:
+        with patch.dict(os.environ, {}, clear=True), patch("jama_cli.config.CONFIG_FILE") as mock_config:
                 mock_config.exists.return_value = False
                 # Clear any JAMA_CONFIG env var
                 result = get_config_path()
@@ -250,12 +247,11 @@ class TestGetProfileOrEnv:
         """Test getting profile from environment variables with OAuth."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            with patch("jama_cli.config.get_config_path", return_value=config_path):
-                with patch.dict(os.environ, {
-                    "JAMA_URL": "https://env.jamacloud.com",
-                    "JAMA_CLIENT_ID": "env_client",
-                    "JAMA_CLIENT_SECRET": "env_secret",
-                }, clear=True):
+            with patch("jama_cli.config.get_config_path", return_value=config_path), patch.dict(os.environ, {
+                "JAMA_URL": "https://env.jamacloud.com",
+                "JAMA_CLIENT_ID": "env_client",
+                "JAMA_CLIENT_SECRET": "env_secret",
+            }, clear=True):
                     profile = get_profile_or_env(None)
                     assert profile is not None
                     assert profile.url == "https://env.jamacloud.com"
@@ -265,12 +261,11 @@ class TestGetProfileOrEnv:
         """Test getting profile from env with basic auth."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            with patch("jama_cli.config.get_config_path", return_value=config_path):
-                with patch.dict(os.environ, {
-                    "JAMA_URL": "https://env.jamacloud.com",
-                    "JAMA_USERNAME": "user",
-                    "JAMA_PASSWORD": "pass",
-                }, clear=True):
+            with patch("jama_cli.config.get_config_path", return_value=config_path), patch.dict(os.environ, {
+                "JAMA_URL": "https://env.jamacloud.com",
+                "JAMA_USERNAME": "user",
+                "JAMA_PASSWORD": "pass",
+            }, clear=True):
                     profile = get_profile_or_env(None)
                     assert profile is not None
                     assert profile.url == "https://env.jamacloud.com"
@@ -280,11 +275,10 @@ class TestGetProfileOrEnv:
         """Test getting profile from env with API key."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            with patch("jama_cli.config.get_config_path", return_value=config_path):
-                with patch.dict(os.environ, {
-                    "JAMA_URL": "https://env.jamacloud.com",
-                    "JAMA_API_KEY": "mykey",
-                }, clear=True):
+            with patch("jama_cli.config.get_config_path", return_value=config_path), patch.dict(os.environ, {
+                "JAMA_URL": "https://env.jamacloud.com",
+                "JAMA_API_KEY": "mykey",
+            }, clear=True):
                     profile = get_profile_or_env(None)
                     assert profile is not None
                     assert profile.api_key == "mykey"
@@ -293,7 +287,6 @@ class TestGetProfileOrEnv:
         """Test when no profile and no env vars."""
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.yml"
-            with patch("jama_cli.config.get_config_path", return_value=config_path):
-                with patch.dict(os.environ, {}, clear=True):
+            with patch("jama_cli.config.get_config_path", return_value=config_path), patch.dict(os.environ, {}, clear=True):
                     profile = get_profile_or_env(None)
                     assert profile is None

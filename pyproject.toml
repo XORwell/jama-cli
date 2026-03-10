@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "jama-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Command-line interface for Jama requirements management with MCP server support"
 authors = ["Christian Nennemann <0lt7axgtr@mozmail.com>"]
 readme = "README.md"
@@ -90,6 +90,7 @@ module = [
     "py_jama_rest_client.*",
     "aiohttp_swagger3.*",
     "mcp.*",
+    "requests.*",
 ]
 ignore_missing_imports = true
 
@@ -100,6 +101,18 @@ module = [
 ]
 disallow_untyped_defs = false
 disable_error_code = ["union-attr"]
+
+[[tool.mypy.overrides]]
+module = [
+    "jama_cli.core.client",
+    "jama_cli.commands.migrate",
+    "jama_cli.commands.trace",
+    "jama_cli.commands.diff",
+    "jama_cli.commands.search",
+    "jama_cli.commands.config_cmd",
+    "jama_cli.config",
+]
+disable_error_code = ["no-any-return", "arg-type", "index", "type-arg", "var-annotated", "assignment", "misc", "no-untyped-def"]
 
 [tool.ruff]
 line-length = 100

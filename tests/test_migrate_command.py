@@ -5,7 +5,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from jama_cli.commands.migrate import app
@@ -136,8 +135,8 @@ class TestHelperFunctions:
 
     def test_filter_writable_fields(self):
         """Test filtering read-only fields."""
-        from jama_cli.commands.migrate import _filter_writable_fields, READ_ONLY_FIELDS
-        
+        from jama_cli.commands.migrate import READ_ONLY_FIELDS, _filter_writable_fields
+
         item = {
             "id": 1,
             "documentKey": "TEST-1",
@@ -145,10 +144,10 @@ class TestHelperFunctions:
             "fields": {"name": "Test"},
         }
         filtered = _filter_writable_fields(item)
-        
+
         # Should not contain read-only fields
         for field in READ_ONLY_FIELDS:
             assert field not in filtered
-        
+
         # Should keep fields dict
         assert "fields" in filtered or "name" in str(filtered)

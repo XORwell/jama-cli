@@ -7,6 +7,7 @@ Run with: pytest tests/test_write_operations.py --integration
 WARNING: These tests modify data in the Jama instance. Use with caution.
 """
 
+import contextlib
 import os
 
 import pytest
@@ -158,10 +159,8 @@ class TestWriteOperations:
             finally:
                 # Clean up if we created a relationship
                 if rel_id is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         server.jama_client.delete_relationship(rel_id)
-                    except Exception:
-                        pass  # Ignore cleanup errors
 
         finally:
             await server.stop()
@@ -174,7 +173,7 @@ class TestWriteOperations:
             await server._initialize_jama_client()
 
             # Try to get non-existent item
-            with pytest.raises(Exception):
+            with pytest.raises((KeyError, ValueError, RuntimeError)):
                 server.jama_client.get_item(999999999)
 
         finally:

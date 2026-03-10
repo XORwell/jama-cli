@@ -1,8 +1,8 @@
 """Comprehensive tests for MCP API client to achieve 100% coverage."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-import aiohttp
+
+import pytest
 
 from jama_mcp_server.api.client import JamaMCPClient
 from jama_mcp_server.models import HealthCheckResponse, MCPResponse

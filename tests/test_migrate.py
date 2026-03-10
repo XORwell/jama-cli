@@ -3,9 +3,6 @@
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from jama_cli.commands.migrate import (
     ExportData,

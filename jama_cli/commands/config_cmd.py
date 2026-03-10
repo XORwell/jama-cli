@@ -273,7 +273,7 @@ def cache_info(
     The CLI uses two cache layers:
     - Memory cache: Item types, pick lists (within session)
     - Disk cache: Project items, relationships (persists between runs)
-    
+
     Examples:
         jama config cache              # Show cache stats
         jama config cache --clear      # Clear all caches
@@ -281,9 +281,9 @@ def cache_info(
     """
     import json
     import time
-    from pathlib import Path
+
     from jama_cli.config import get_profile_or_env
-    from jama_cli.core.client import JamaClient, CACHE_DIR
+    from jama_cli.core.client import CACHE_DIR, JamaClient
 
     # Get profile to access the client
     profile = get_profile_or_env(None)
@@ -304,7 +304,7 @@ def cache_info(
 
     # Show cache statistics
     stats = client.get_cache_stats()
-    
+
     # Memory cache stats
     console.print("\n[bold]Memory Cache[/bold] (session only)")
     mem_stats = stats.get("memory", {})
@@ -316,7 +316,7 @@ def cache_info(
     table.add_row("Misses", str(mem_stats.get("misses", 0)))
     table.add_row("Hit Rate", f"{mem_stats.get('hit_rate', 0)}%")
     console.print(table)
-    
+
     # Disk cache stats
     console.print("\n[bold]Disk Cache[/bold] (persists between runs)")
     disk_stats = stats.get("disk", {})
@@ -328,14 +328,14 @@ def cache_info(
         table2.add_row("Hits", str(disk_stats.get("hits", 0)))
         table2.add_row("Misses", str(disk_stats.get("misses", 0)))
         console.print(table2)
-    
+
     # Count and show disk cache files
     if CACHE_DIR.exists():
         cache_files = list(CACHE_DIR.rglob("*.json"))
         total_size = sum(f.stat().st_size for f in cache_files)
         console.print(f"  Files: {len(cache_files)}")
         console.print(f"  Size: {total_size / 1024:.1f} KB")
-        
+
         if show_files and cache_files:
             console.print("\n[bold]Cached Files:[/bold]")
             file_table = Table()
@@ -343,7 +343,7 @@ def cache_info(
             file_table.add_column("Age")
             file_table.add_column("Expires")
             file_table.add_column("Size")
-            
+
             for f in sorted(cache_files)[:20]:  # Limit to 20 files
                 try:
                     with open(f) as fp:
@@ -351,10 +351,10 @@ def cache_info(
                     key = data.get("key", "unknown")
                     created = data.get("created_at", 0)
                     expires = data.get("expires_at", 0)
-                    
+
                     # Parse key type
                     key_type = key.split(":")[0] if ":" in key else "unknown"
-                    
+
                     # Calculate age
                     age_sec = time.time() - created
                     if age_sec < 60:
@@ -363,7 +363,7 @@ def cache_info(
                         age_str = f"{int(age_sec/60)}m ago"
                     else:
                         age_str = f"{int(age_sec/3600)}h ago"
-                    
+
                     # Time until expiry
                     ttl = expires - time.time()
                     if ttl < 0:
@@ -374,17 +374,17 @@ def cache_info(
                         ttl_str = f"{int(ttl/60)}m"
                     else:
                         ttl_str = f"{int(ttl/3600)}h"
-                    
+
                     size_str = f"{f.stat().st_size / 1024:.1f} KB"
-                    
+
                     file_table.add_row(key_type, age_str, ttl_str, size_str)
                 except Exception:
                     pass
-            
+
             console.print(file_table)
             if len(cache_files) > 20:
                 console.print(f"[dim]... and {len(cache_files) - 20} more files[/dim]")
     else:
         console.print("  [dim]No disk cache yet[/dim]")
-    
+
     console.print("\n[dim]Tip: Use --clear to clear caches, or --refresh on commands to bypass cache[/dim]")

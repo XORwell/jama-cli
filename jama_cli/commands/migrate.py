@@ -7,12 +7,19 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 
-from jama_cli.config import get_profile, get_profile_or_env, load_config
+from jama_cli.config import get_profile_or_env, load_config
 from jama_cli.core.client import JamaClient
-from jama_cli.models import JamaProfile
 from jama_cli.output import console, print_error, print_success, print_warning
 
 app = typer.Typer(
@@ -136,7 +143,7 @@ def export_items(
     ] = None,
 ) -> None:
     """Export items from a project to a JSON file.
-    
+
     By default exports items only (fast). Use --relationships for full export (slower).
 
     Examples:
@@ -187,7 +194,7 @@ def export_items(
                 # Use max_results for server-side limiting when possible
                 items = client.get_items(project_id, item_type=item_type, max_results=max_items)
             progress.update(task, completed=True)
-            
+
             console.print(f"[dim]Found {len(items)} items[/dim]")
 
             # Build hierarchy map
@@ -295,7 +302,7 @@ def _get_items_recursive(
     """Recursively get all children of an item."""
     if collected is None:
         collected = []
-    
+
     # Check max limit
     if max_items and len(collected) >= max_items:
         return collected
@@ -307,12 +314,12 @@ def _get_items_recursive(
         progress.console.print(f"[dim]Fetching children of {parent.get('documentKey', parent_id)}...[/dim]")
 
     children = client.get_item_children(parent_id)
-    
+
     for child in children:
         if max_items and len(collected) >= max_items:
             break
         collected.append(child)
-        
+
         child_id = child.get("id")
         if child_id:
             _get_items_recursive(client, child_id, progress, depth + 1, max_items, collected)
@@ -704,27 +711,27 @@ def clone_items(
         COMPONENT_TYPE = 30
         SET_TYPE = 31
         FOLDER_TYPE = 32
-        
+
         import re  # For setKey generation
-        
+
         # Auto-create container if needed
         container_parent_id: int | None = target_parent
         skip_source_ids: set[int] = set()  # Items to skip (like source Set when we create a new one)
         id_mapping: dict[int, int] = {}  # Pre-populate with mappings for skipped items
-        
+
         if auto_container and not dry_run:
             # Find the root item(s) to determine what container we need
             root_items = [i for i in items if i.get("location", {}).get("parent", {}).get("item") == source_parent or 
                          i.get("location", {}).get("parent", {}).get("item") is None]
-            
+
             if root_items:
                 first_root = root_items[0]
                 first_type = first_root.get("itemType")
                 first_root_id = first_root.get("id")
-                
+
                 # Determine container name
                 auto_name = container_name or first_root.get("fields", {}).get("name", "Cloned Items")
-                
+
                 # If first item is a Set, create Component + Set and map the source Set to the new Set
                 if first_type == SET_TYPE:
                     console.print(f"\n[cyan]Auto-creating Component + Set container: {auto_name}[/cyan]")
@@ -738,11 +745,11 @@ def clone_items(
                             fields={"name": auto_name},
                         )
                         console.print(f"  Created Component with ID: {component_id}")
-                        
+
                         # Get setKey from source or generate
                         source_set_key = first_root.get("fields", {}).get("setKey", "")
                         set_key = source_set_key or re.sub(r'[^A-Z0-9]', '', auto_name.upper())[:10] or "CLONED"
-                        
+
                         # Create Set under Component (use source Set's child type)
                         source_child_type = first_root.get("childItemType", SET_TYPE)
                         set_id = client.create_item(
@@ -753,16 +760,16 @@ def clone_items(
                             fields={"name": first_root.get("fields", {}).get("name", auto_name), "setKey": set_key},
                         )
                         console.print(f"  Created Set with ID: {set_id} (setKey: {set_key})")
-                        
+
                         # Map the source Set ID to the new Set ID, so children will be placed under it
                         id_mapping[first_root_id] = set_id
                         skip_source_ids.add(first_root_id)  # Don't try to clone the source Set itself
-                        
+
                         container_parent_id = set_id
                     except Exception as e:
                         print_error(f"Failed to create container hierarchy: {e}")
                         raise typer.Exit(1) from e
-                
+
                 # If first item is a Folder, we need Component + Set
                 elif first_type == FOLDER_TYPE:
                     console.print(f"\n[cyan]Auto-creating Component + Set container: {auto_name}[/cyan]")
@@ -775,9 +782,9 @@ def clone_items(
                             fields={"name": auto_name},
                         )
                         console.print(f"  Created Component with ID: {component_id}")
-                        
+
                         set_key = re.sub(r'[^A-Z0-9]', '', auto_name.upper())[:10] or "CLONED"
-                        
+
                         set_id = client.create_item(
                             project_id=target_project,
                             item_type_id=SET_TYPE,
@@ -790,7 +797,7 @@ def clone_items(
                     except Exception as e:
                         print_error(f"Failed to create container hierarchy: {e}")
                         raise typer.Exit(1) from e
-                
+
                 # If first item is a TestCase (88), we need Component + Set
                 elif first_type not in (COMPONENT_TYPE, SET_TYPE, FOLDER_TYPE):
                     console.print(f"\n[cyan]Auto-creating Component + Set container for test cases: {auto_name}[/cyan]")
@@ -803,9 +810,9 @@ def clone_items(
                             fields={"name": auto_name},
                         )
                         console.print(f"  Created Component with ID: {component_id}")
-                        
+
                         set_key = re.sub(r'[^A-Z0-9]', '', auto_name.upper())[:10] or "CLONED"
-                        
+
                         set_id = client.create_item(
                             project_id=target_project,
                             item_type_id=SET_TYPE,

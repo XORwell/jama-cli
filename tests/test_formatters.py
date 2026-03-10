@@ -1,17 +1,13 @@
 """Unit tests for output formatters."""
 
-import json
-from io import StringIO
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from jama_cli.output.formatters import (
     OutputFormat,
+    _format_cell_value,
+    _format_column_name,
     format_output,
     format_single_item,
-    _format_column_name,
-    _format_cell_value,
 )
 
 
