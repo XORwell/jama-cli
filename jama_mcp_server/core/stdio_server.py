@@ -92,9 +92,20 @@ class JamaStdioMCPServer:
                         "properties": {
                             "project_id": {"type": "integer", "description": "Project ID"},
                             "item_type_id": {"type": "integer", "description": "Item type ID"},
-                            "fields": {"type": "object", "description": "Item fields"},
+                            "child_item_type_id": {
+                                "type": "integer",
+                                "description": "Child item type ID (for Sets/Components). Omit if not applicable.",
+                            },
+                            "location": {
+                                "type": "object",
+                                "description": (
+                                    'Parent location. E.g. {"item": 12345} for child of item, '
+                                    'or {"project": 42} for project root'
+                                ),
+                            },
+                            "fields": {"type": "object", "description": "Item fields (name, description, etc.)"},
                         },
-                        "required": ["project_id", "item_type_id", "fields"],
+                        "required": ["project_id", "item_type_id", "location", "fields"],
                     },
                 ),
                 Tool(
@@ -132,7 +143,7 @@ class JamaStdioMCPServer:
                     },
                 ),
                 Tool(
-                    name="get_relationships",
+                    name="get_relationship_types",
                     description="Get all relationship types",
                     inputSchema={
                         "type": "object",
@@ -140,8 +151,19 @@ class JamaStdioMCPServer:
                     },
                 ),
                 Tool(
-                    name="get_item_relationships",
-                    description="Get relationships for an item",
+                    name="get_item_upstream_relationships",
+                    description="Get upstream relationships for an item",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                        },
+                        "required": ["item_id"],
+                    },
+                ),
+                Tool(
+                    name="get_item_downstream_relationships",
+                    description="Get downstream relationships for an item",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -174,13 +196,10 @@ class JamaStdioMCPServer:
                 ),
                 Tool(
                     name="get_pick_lists",
-                    description="Get all pick lists in a project",
+                    description="Get all pick lists (global, not project-specific)",
                     inputSchema={
                         "type": "object",
-                        "properties": {
-                            "project_id": {"type": "integer", "description": "Project ID"},
-                        },
-                        "required": ["project_id"],
+                        "properties": {},
                     },
                 ),
                 Tool(
@@ -288,6 +307,110 @@ class JamaStdioMCPServer:
                         "required": ["filter_id"],
                     },
                 ),
+                Tool(
+                    name="create_relationship",
+                    description="Create a relationship (traceability link) between two items",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "from_item": {"type": "integer", "description": "Source item ID"},
+                            "to_item": {"type": "integer", "description": "Target item ID"},
+                            "relationship_type": {
+                                "type": "integer",
+                                "description": "Relationship type ID. Omit for default 'Related to'.",
+                            },
+                        },
+                        "required": ["from_item", "to_item"],
+                    },
+                ),
+                Tool(
+                    name="create_test_plan",
+                    description="Create a new test plan in a project",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "project_id": {"type": "integer", "description": "Project ID"},
+                            "name": {"type": "string", "description": "Test plan name"},
+                            "description": {
+                                "type": "string",
+                                "description": "Test plan description (optional)",
+                            },
+                            "start_date": {
+                                "type": "string",
+                                "description": "Start date YYYY-MM-DD (optional)",
+                            },
+                            "end_date": {
+                                "type": "string",
+                                "description": "End date YYYY-MM-DD (optional)",
+                            },
+                        },
+                        "required": ["project_id", "name"],
+                    },
+                ),
+                Tool(
+                    name="get_test_cycle",
+                    description="Get a specific test cycle by ID",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "test_cycle_id": {"type": "integer", "description": "Test cycle ID"},
+                        },
+                        "required": ["test_cycle_id"],
+                    },
+                ),
+                Tool(
+                    name="get_test_runs",
+                    description="Get test runs for a test cycle",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "test_cycle_id": {"type": "integer", "description": "Test cycle ID"},
+                        },
+                        "required": ["test_cycle_id"],
+                    },
+                ),
+                Tool(
+                    name="create_test_cycle",
+                    description="Create a test cycle under a test plan",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "testplan_id": {"type": "integer", "description": "Test plan ID"},
+                            "name": {"type": "string", "description": "Test cycle name"},
+                            "start_date": {
+                                "type": "string",
+                                "description": "Start date (YYYY-MM-DD)",
+                            },
+                            "end_date": {
+                                "type": "string",
+                                "description": "End date (YYYY-MM-DD)",
+                            },
+                            "testgroups_to_include": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "description": "Test group IDs to include (optional)",
+                            },
+                            "testrun_status_to_include": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Test run statuses to include (optional)",
+                            },
+                        },
+                        "required": ["testplan_id", "name", "start_date", "end_date"],
+                    },
+                ),
+                Tool(
+                    name="update_test_run",
+                    description="Update a test run (e.g. set status/result)",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "test_run_id": {"type": "integer", "description": "Test run ID"},
+                            "data": {"type": "object", "description": "Test run data to update"},
+                        },
+                        "required": ["test_run_id", "data"],
+                    },
+                ),
             ]
 
         @self.mcp.call_tool()
@@ -329,9 +452,13 @@ class JamaStdioMCPServer:
             return await loop.run_in_executor(None, self.jama_client.get_projects)
 
         elif name == "get_project":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_project, arguments["project_id"]
-            )
+
+            def get_single_project() -> Any:
+                projects = self.jama_client.get_projects()  # type: ignore[union-attr]
+                project_id = arguments["project_id"]
+                return next((p for p in projects if p["id"] == project_id), None)
+
+            return await loop.run_in_executor(None, get_single_project)
 
         elif name == "get_item":
             return await loop.run_in_executor(None, self.jama_client.get_item, arguments["item_id"])
@@ -347,6 +474,8 @@ class JamaStdioMCPServer:
                 self.jama_client.post_item,
                 arguments["project_id"],
                 arguments["item_type_id"],
+                arguments.get("child_item_type_id"),
+                arguments["location"],
                 arguments["fields"],
             )
 
@@ -367,15 +496,20 @@ class JamaStdioMCPServer:
 
         elif name == "get_item_children":
             return await loop.run_in_executor(
-                None, self.jama_client.get_items_children, arguments["item_id"]
+                None, self.jama_client.get_item_children, arguments["item_id"]
             )
 
-        elif name == "get_relationships":
+        elif name == "get_relationship_types":
             return await loop.run_in_executor(None, self.jama_client.get_relationship_types)
 
-        elif name == "get_item_relationships":
+        elif name == "get_item_upstream_relationships":
             return await loop.run_in_executor(
-                None, self.jama_client.get_relationships, arguments["item_id"]
+                None, self.jama_client.get_items_upstream_relationships, arguments["item_id"]
+            )
+
+        elif name == "get_item_downstream_relationships":
+            return await loop.run_in_executor(
+                None, self.jama_client.get_items_downstream_relationships, arguments["item_id"]
             )
 
         elif name == "get_tags":
@@ -389,9 +523,7 @@ class JamaStdioMCPServer:
             )
 
         elif name == "get_pick_lists":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_pick_lists, arguments["project_id"]
-            )
+            return await loop.run_in_executor(None, self.jama_client.get_pick_lists)
 
         elif name == "get_baselines":
             return await loop.run_in_executor(
@@ -437,6 +569,69 @@ class JamaStdioMCPServer:
         elif name == "get_filter_results":
             return await loop.run_in_executor(
                 None, self.jama_client.get_filter_results, arguments["filter_id"]
+            )
+
+        elif name == "create_relationship":
+            return await loop.run_in_executor(
+                None,
+                self.jama_client.post_relationship,
+                arguments["from_item"],
+                arguments["to_item"],
+                arguments.get("relationship_type"),
+            )
+
+        elif name == "create_test_plan":
+
+            def _create_test_plan() -> int:
+                """Bypass py_jama_rest_client (no upstream method) — POST /testplans directly."""
+                fields: dict[str, Any] = {"name": arguments["name"]}
+                if arguments.get("description"):
+                    fields["description"] = arguments["description"]
+                if arguments.get("start_date"):
+                    fields["startDate"] = arguments["start_date"]
+                if arguments.get("end_date"):
+                    fields["endDate"] = arguments["end_date"]
+
+                body = {"project": arguments["project_id"], "fields": fields}
+                headers = {"content-type": "application/json"}
+                response = self.jama_client._JamaClient__core.post(  # type: ignore[union-attr]
+                    "testplans", data=json.dumps(body), headers=headers
+                )
+                if not (200 <= response.status_code < 300):
+                    msg = response.json().get("meta", {}).get("message", "Unknown error")
+                    raise RuntimeError(f"POST testplans failed [{response.status_code}]: {msg}")
+                return int(response.json()["meta"]["id"])
+
+            return await loop.run_in_executor(None, _create_test_plan)
+
+        elif name == "get_test_cycle":
+            return await loop.run_in_executor(
+                None, self.jama_client.get_test_cycle, arguments["test_cycle_id"]
+            )
+
+        elif name == "get_test_runs":
+            return await loop.run_in_executor(
+                None, self.jama_client.get_testruns, arguments["test_cycle_id"]
+            )
+
+        elif name == "create_test_cycle":
+            return await loop.run_in_executor(
+                None,
+                self.jama_client.post_testplans_testcycles,
+                arguments["testplan_id"],
+                arguments["name"],
+                arguments["start_date"],
+                arguments["end_date"],
+                arguments.get("testgroups_to_include"),
+                arguments.get("testrun_status_to_include"),
+            )
+
+        elif name == "update_test_run":
+            return await loop.run_in_executor(
+                None,
+                self.jama_client.put_test_run,
+                arguments["test_run_id"],
+                arguments["data"],
             )
 
         else:

@@ -151,9 +151,13 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_project(self, server_with_client):
         """Test get_project tool."""
-        server_with_client.jama_client.get_project.return_value = {"id": 1, "name": "Test"}
+        server_with_client.jama_client.get_projects.return_value = [
+            {"id": 1, "name": "Test"},
+            {"id": 2, "name": "Other"},
+        ]
         result = await server_with_client._execute_tool("get_project", {"project_id": 1})
         assert result["id"] == 1
+        assert result["name"] == "Test"
 
     @pytest.mark.asyncio
     async def test_execute_get_item(self, server_with_client):
@@ -175,7 +179,12 @@ class TestExecuteTool:
         server_with_client.jama_client.post_item.return_value = 123
         result = await server_with_client._execute_tool(
             "create_item",
-            {"project_id": 1, "item_type_id": 33, "fields": {"name": "Test"}},
+            {
+                "project_id": 1,
+                "item_type_id": 33,
+                "location": {"project": 1},
+                "fields": {"name": "Test"},
+            },
         )
         assert result == 123
 
@@ -199,23 +208,34 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_item_children(self, server_with_client):
         """Test get_item_children tool."""
-        server_with_client.jama_client.get_items_children.return_value = [{"id": 2}]
+        server_with_client.jama_client.get_item_children.return_value = [{"id": 2}]
         result = await server_with_client._execute_tool("get_item_children", {"item_id": 1})
         assert result == [{"id": 2}]
 
     @pytest.mark.asyncio
-    async def test_execute_get_relationships(self, server_with_client):
-        """Test get_relationships tool."""
+    async def test_execute_get_relationship_types(self, server_with_client):
+        """Test get_relationship_types tool."""
         server_with_client.jama_client.get_relationship_types.return_value = [{"id": 1}]
-        result = await server_with_client._execute_tool("get_relationships", {})
+        result = await server_with_client._execute_tool("get_relationship_types", {})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
-    async def test_execute_get_item_relationships(self, server_with_client):
-        """Test get_item_relationships tool."""
-        server_with_client.jama_client.get_relationships.return_value = [{"id": 1}]
-        result = await server_with_client._execute_tool("get_item_relationships", {"item_id": 100})
+    async def test_execute_get_item_upstream_relationships(self, server_with_client):
+        """Test get_item_upstream_relationships tool."""
+        server_with_client.jama_client.get_items_upstream_relationships.return_value = [{"id": 1}]
+        result = await server_with_client._execute_tool(
+            "get_item_upstream_relationships", {"item_id": 100}
+        )
         assert result == [{"id": 1}]
+
+    @pytest.mark.asyncio
+    async def test_execute_get_item_downstream_relationships(self, server_with_client):
+        """Test get_item_downstream_relationships tool."""
+        server_with_client.jama_client.get_items_downstream_relationships.return_value = [{"id": 2}]
+        result = await server_with_client._execute_tool(
+            "get_item_downstream_relationships", {"item_id": 100}
+        )
+        assert result == [{"id": 2}]
 
     @pytest.mark.asyncio
     async def test_execute_get_tags(self, server_with_client):
@@ -238,7 +258,7 @@ class TestExecuteTool:
     async def test_execute_get_pick_lists(self, server_with_client):
         """Test get_pick_lists tool."""
         server_with_client.jama_client.get_pick_lists.return_value = [{"id": 1}]
-        result = await server_with_client._execute_tool("get_pick_lists", {"project_id": 1})
+        result = await server_with_client._execute_tool("get_pick_lists", {})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
