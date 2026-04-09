@@ -116,7 +116,7 @@ class TestWriteOperations:
         self, jama_config: JamaConfig, test_item_id: int, test_project_id: int
     ) -> None:
         """Test creating and deleting a relationship."""
-        from py_jama_rest_client.client import AlreadyExistsException
+        from jama_cli.core.exceptions import AlreadyExistsException
 
         server = JamaMCPServer(config=jama_config)
 

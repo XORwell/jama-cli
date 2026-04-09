@@ -30,7 +30,8 @@ include = ["NOTICE"]
 [tool.poetry.dependencies]
 python = "^3.10"
 aiohttp = "^3.9.0"
-py-jama-rest-client = "^1.17.0"
+httpx = ">=0.27.0"
+py-jama-rest-client = "^1.17.0"  # TODO: remove after migrating server.py
 pydantic = "^2.0.0"
 loguru = "^0.7.0"
 typer = {version = ">=0.12.0", extras = ["all"]}
@@ -87,10 +88,9 @@ strict_concatenate = true
 
 [[tool.mypy.overrides]]
 module = [
-    "py_jama_rest_client.*",
     "aiohttp_swagger3.*",
     "mcp.*",
-    "requests.*",
+    "py_jama_rest_client.*",
 ]
 ignore_missing_imports = true
 
@@ -98,6 +98,8 @@ ignore_missing_imports = true
 module = [
     "jama_mcp_server.core.server",
     "jama_mcp_server.core.stdio_server",
+    "jama_cli.core.sync_wrapper",
+    "jama_cli.core.http_client",
 ]
 disallow_untyped_defs = false
 disable_error_code = ["union-attr", "no-any-return", "misc", "return-value"]

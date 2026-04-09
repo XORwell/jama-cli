@@ -1,6 +1,6 @@
-"""Comprehensive tests for stdio MCP server to achieve 100% coverage."""
+"""Comprehensive tests for stdio MCP server."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -21,7 +21,7 @@ class TestJamaStdioMCPServerInit:
         )
         server = JamaStdioMCPServer(config)
         assert server.config == config
-        assert server.jama_client is None
+        assert server._api is None
         assert server.mcp is not None
 
     def test_init_with_api_key(self):
@@ -57,14 +57,14 @@ class TestInitializeClient:
         )
         server = JamaStdioMCPServer(config)
 
-        with patch("jama_mcp_server.core.stdio_server.JamaClient") as mock_client:
+        with patch("jama_mcp_server.core.stdio_server.JamaHttpClient") as mock_http:
             await server.initialize_client()
-            mock_client.assert_called_once_with(
-                host_domain="https://test.jamacloud.com",
+            mock_http.assert_called_once_with(
+                base_url="https://test.jamacloud.com",
                 credentials=("client123", "secret456"),
                 oauth=True,
             )
-            assert server.jama_client is not None
+            assert server._api is not None
 
     @pytest.mark.asyncio
     async def test_initialize_client_api_key(self):
@@ -75,11 +75,12 @@ class TestInitializeClient:
         )
         server = JamaStdioMCPServer(config)
 
-        with patch("jama_mcp_server.core.stdio_server.JamaClient") as mock_client:
+        with patch("jama_mcp_server.core.stdio_server.JamaHttpClient") as mock_http:
             await server.initialize_client()
-            mock_client.assert_called_once_with(
-                host_domain="https://test.jamacloud.com",
-                credentials=("apikey123",),
+            mock_http.assert_called_once_with(
+                base_url="https://test.jamacloud.com",
+                credentials=("apikey123", ""),
+                oauth=False,
             )
 
     @pytest.mark.asyncio
@@ -93,10 +94,10 @@ class TestInitializeClient:
         )
         server = JamaStdioMCPServer(config)
 
-        with patch("jama_mcp_server.core.stdio_server.JamaClient") as mock_client:
+        with patch("jama_mcp_server.core.stdio_server.JamaHttpClient") as mock_http:
             await server.initialize_client()
-            mock_client.assert_called_once_with(
-                host_domain="https://test.jamacloud.com",
+            mock_http.assert_called_once_with(
+                base_url="https://test.jamacloud.com",
                 credentials=("user", "pass"),
                 oauth=False,
             )
@@ -111,8 +112,8 @@ class TestInitializeClient:
         )
         server = JamaStdioMCPServer(config)
 
-        with patch("jama_mcp_server.core.stdio_server.JamaClient") as mock_client:
-            mock_client.side_effect = Exception("Connection failed")
+        with patch("jama_mcp_server.core.stdio_server.JamaHttpClient") as mock_http:
+            mock_http.side_effect = Exception("Connection failed")
             with pytest.raises(Exception, match="Connection failed"):
                 await server.initialize_client()
 
@@ -122,14 +123,14 @@ class TestExecuteTool:
 
     @pytest.fixture
     def server_with_client(self):
-        """Create server with mocked client."""
+        """Create server with mocked async API."""
         config = JamaConfig(
             url="https://test.jamacloud.com",
             client_id="client123",
             client_secret="secret456",
         )
         server = JamaStdioMCPServer(config)
-        server.jama_client = MagicMock()
+        server._api = AsyncMock()
         return server
 
     @pytest.mark.asyncio
@@ -144,17 +145,14 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_projects(self, server_with_client):
         """Test get_projects tool."""
-        server_with_client.jama_client.get_projects.return_value = [{"id": 1}]
+        server_with_client._api.get_projects.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_projects", {})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
     async def test_execute_get_project(self, server_with_client):
         """Test get_project tool."""
-        server_with_client.jama_client.get_projects.return_value = [
-            {"id": 1, "name": "Test"},
-            {"id": 2, "name": "Other"},
-        ]
+        server_with_client._api.get_project.return_value = {"id": 1, "name": "Test"}
         result = await server_with_client._execute_tool("get_project", {"project_id": 1})
         assert result["id"] == 1
         assert result["name"] == "Test"
@@ -162,21 +160,21 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_item(self, server_with_client):
         """Test get_item tool."""
-        server_with_client.jama_client.get_item.return_value = {"id": 100}
+        server_with_client._api.get_item.return_value = {"id": 100}
         result = await server_with_client._execute_tool("get_item", {"item_id": 100})
         assert result["id"] == 100
 
     @pytest.mark.asyncio
     async def test_execute_get_items(self, server_with_client):
         """Test get_items tool."""
-        server_with_client.jama_client.get_items.return_value = [{"id": 1}, {"id": 2}]
+        server_with_client._api.get_items.return_value = [{"id": 1}, {"id": 2}]
         result = await server_with_client._execute_tool("get_items", {"project_id": 1})
         assert len(result) == 2
 
     @pytest.mark.asyncio
     async def test_execute_create_item(self, server_with_client):
         """Test create_item tool."""
-        server_with_client.jama_client.post_item.return_value = 123
+        server_with_client._api.post_item.return_value = 123
         result = await server_with_client._execute_tool(
             "create_item",
             {
@@ -191,38 +189,38 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_update_item(self, server_with_client):
         """Test update_item tool."""
-        server_with_client.jama_client.patch_item.return_value = True
+        server_with_client._api.patch_item.return_value = 200
         result = await server_with_client._execute_tool(
             "update_item",
             {"item_id": 100, "fields": {"name": "Updated"}},
         )
-        assert result is True
+        assert result == 200
 
     @pytest.mark.asyncio
     async def test_execute_delete_item(self, server_with_client):
         """Test delete_item tool."""
-        server_with_client.jama_client.delete_item.return_value = True
+        server_with_client._api.delete_item.return_value = 200
         result = await server_with_client._execute_tool("delete_item", {"item_id": 100})
-        assert result is True
+        assert result == 200
 
     @pytest.mark.asyncio
     async def test_execute_get_item_children(self, server_with_client):
         """Test get_item_children tool."""
-        server_with_client.jama_client.get_item_children.return_value = [{"id": 2}]
+        server_with_client._api.get_item_children.return_value = [{"id": 2}]
         result = await server_with_client._execute_tool("get_item_children", {"item_id": 1})
         assert result == [{"id": 2}]
 
     @pytest.mark.asyncio
     async def test_execute_get_relationship_types(self, server_with_client):
         """Test get_relationship_types tool."""
-        server_with_client.jama_client.get_relationship_types.return_value = [{"id": 1}]
+        server_with_client._api.get_relationship_types.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_relationship_types", {})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
     async def test_execute_get_item_upstream_relationships(self, server_with_client):
         """Test get_item_upstream_relationships tool."""
-        server_with_client.jama_client.get_items_upstream_relationships.return_value = [{"id": 1}]
+        server_with_client._api.get_items_upstream_relationships.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool(
             "get_item_upstream_relationships", {"item_id": 100}
         )
@@ -231,7 +229,7 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_item_downstream_relationships(self, server_with_client):
         """Test get_item_downstream_relationships tool."""
-        server_with_client.jama_client.get_items_downstream_relationships.return_value = [{"id": 2}]
+        server_with_client._api.get_items_downstream_relationships.return_value = [{"id": 2}]
         result = await server_with_client._execute_tool(
             "get_item_downstream_relationships", {"item_id": 100}
         )
@@ -240,14 +238,14 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_tags(self, server_with_client):
         """Test get_tags tool."""
-        server_with_client.jama_client.get_tags.return_value = [{"id": 1, "name": "Tag1"}]
+        server_with_client._api.get_tags.return_value = [{"id": 1, "name": "Tag1"}]
         result = await server_with_client._execute_tool("get_tags", {"project_id": 1})
         assert result[0]["name"] == "Tag1"
 
     @pytest.mark.asyncio
     async def test_execute_get_item_type(self, server_with_client):
         """Test get_item_type tool."""
-        server_with_client.jama_client.get_item_type.return_value = {
+        server_with_client._api.get_item_type.return_value = {
             "id": 33,
             "display": "Requirement",
         }
@@ -257,65 +255,65 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_pick_lists(self, server_with_client):
         """Test get_pick_lists tool."""
-        server_with_client.jama_client.get_pick_lists.return_value = [{"id": 1}]
+        server_with_client._api.get_pick_lists.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_pick_lists", {})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
     async def test_execute_get_baselines(self, server_with_client):
         """Test get_baselines tool."""
-        server_with_client.jama_client.get_baselines.return_value = [{"id": 1}]
+        server_with_client._api.get_baselines.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_baselines", {"project_id": 1})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
     async def test_execute_get_baseline(self, server_with_client):
         """Test get_baseline tool."""
-        server_with_client.jama_client.get_baseline.return_value = {"id": 1}
+        server_with_client._api.get_baseline.return_value = {"id": 1}
         result = await server_with_client._execute_tool("get_baseline", {"baseline_id": 1})
         assert result["id"] == 1
 
     @pytest.mark.asyncio
     async def test_execute_get_current_user(self, server_with_client):
         """Test get_current_user tool."""
-        server_with_client.jama_client.get_current_user.return_value = {"id": 1, "username": "user"}
+        server_with_client._api.get_current_user.return_value = {"id": 1, "username": "user"}
         result = await server_with_client._execute_tool("get_current_user", {})
         assert result["username"] == "user"
 
     @pytest.mark.asyncio
     async def test_execute_get_users(self, server_with_client):
         """Test get_users tool."""
-        server_with_client.jama_client.get_users.return_value = [{"id": 1}]
+        server_with_client._api.get_users.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_users", {})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
     async def test_execute_get_item_versions(self, server_with_client):
         """Test get_item_versions tool."""
-        server_with_client.jama_client.get_item_versions.return_value = [{"version": 1}]
+        server_with_client._api.get_item_versions.return_value = [{"version": 1}]
         result = await server_with_client._execute_tool("get_item_versions", {"item_id": 100})
         assert result[0]["version"] == 1
 
     @pytest.mark.asyncio
     async def test_execute_get_item_tags(self, server_with_client):
         """Test get_item_tags tool."""
-        server_with_client.jama_client.get_item_tags.return_value = [{"id": 1}]
+        server_with_client._api.get_item_tags.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_item_tags", {"item_id": 100})
         assert result == [{"id": 1}]
 
     @pytest.mark.asyncio
     async def test_execute_post_item_tag(self, server_with_client):
         """Test post_item_tag tool."""
-        server_with_client.jama_client.post_item_tag.return_value = True
+        server_with_client._api.post_item_tag.return_value = 200
         result = await server_with_client._execute_tool(
             "post_item_tag", {"item_id": 100, "tag_id": 1}
         )
-        assert result is True
+        assert result == 200
 
     @pytest.mark.asyncio
     async def test_execute_get_item_workflow_transitions(self, server_with_client):
         """Test get_item_workflow_transitions tool."""
-        server_with_client.jama_client.get_item_workflow_transitions.return_value = [{"id": 1}]
+        server_with_client._api.get_item_workflow_transitions.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool(
             "get_item_workflow_transitions", {"item_id": 100}
         )
@@ -324,7 +322,7 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_attachment(self, server_with_client):
         """Test get_attachment tool."""
-        server_with_client.jama_client.get_attachment.return_value = {
+        server_with_client._api.get_attachment.return_value = {
             "id": 1,
             "fileName": "test.txt",
         }
@@ -334,7 +332,7 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_execute_get_filter_results(self, server_with_client):
         """Test get_filter_results tool."""
-        server_with_client.jama_client.get_filter_results.return_value = [{"id": 1}]
+        server_with_client._api.get_filter_results.return_value = [{"id": 1}]
         result = await server_with_client._execute_tool("get_filter_results", {"filter_id": 1})
         assert result == [{"id": 1}]
 
@@ -352,7 +350,6 @@ class TestToolRegistration:
         """Test that tools are properly registered."""
         config = JamaConfig(url="https://test.jamacloud.com", api_key="key")
         server = JamaStdioMCPServer(config)
-        # The mcp server should have handlers registered
         assert server.mcp is not None
 
 
@@ -360,17 +357,16 @@ class TestRunServer:
     """Tests for server run method."""
 
     @pytest.mark.asyncio
-    async def test_initialize_client_sets_client(self):
-        """Test that initialize_client sets jama_client."""
+    async def test_initialize_client_sets_api(self):
+        """Test that initialize_client sets _api."""
         config = JamaConfig(
             url="https://test.jamacloud.com",
             client_id="client123",
             client_secret="secret456",
         )
         server = JamaStdioMCPServer(config)
-        assert server.jama_client is None
+        assert server._api is None
 
-        with patch("jama_mcp_server.core.stdio_server.JamaClient") as mock_client:
-            mock_client.return_value = MagicMock()
+        with patch("jama_mcp_server.core.stdio_server.JamaHttpClient"):
             await server.initialize_client()
-            assert server.jama_client is not None
+            assert server._api is not None

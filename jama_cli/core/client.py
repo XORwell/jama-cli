@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -14,12 +13,9 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from loguru import logger
-from py_jama_rest_client.client import JamaClient as PyJamaClient
 
+from jama_cli.core.sync_wrapper import SyncJamaApi
 from jama_cli.models import JamaProfile
-
-# Suppress verbose logging from py_jama_rest_client
-logging.getLogger("py_jama_rest_client").setLevel(logging.CRITICAL)
 
 # Default cache directory
 CACHE_DIR = Path.home() / ".cache" / "jama-cli"
@@ -199,7 +195,7 @@ def cached(ttl: int = 300, key_prefix: str = "") -> Callable[[Callable[..., T]],
 
 
 class JamaClient:
-    """Synchronous wrapper around py-jama-rest-client for CLI use.
+    """Jama API client for CLI use.
 
     Features:
     - Automatic connection management
@@ -226,7 +222,7 @@ class JamaClient:
             use_disk_cache: Enable persistent disk caching for large datasets
         """
         self.profile = profile
-        self._client: PyJamaClient | None = None
+        self._api: SyncJamaApi | None = None
         self._cache = Cache()
 
         # Disk cache for large datasets (persists between CLI runs)
@@ -240,36 +236,36 @@ class JamaClient:
 
     def connect(self) -> None:
         """Establish connection to Jama."""
-        if self._client is not None:
+        if self._api is not None:
             return
 
         if self.profile.auth_type == "api_key":
-            self._client = PyJamaClient(
-                host_domain=self.profile.url,
+            self._api = SyncJamaApi.from_credentials(
+                base_url=self.profile.url,
                 credentials=(self.profile.api_key, ""),
                 oauth=False,
             )
         elif self.profile.auth_type == "oauth":
-            self._client = PyJamaClient(
-                host_domain=self.profile.url,
+            self._api = SyncJamaApi.from_credentials(
+                base_url=self.profile.url,
                 credentials=(self.profile.client_id, self.profile.client_secret),
                 oauth=True,
             )
         elif self.profile.auth_type == "basic":
-            self._client = PyJamaClient(
-                host_domain=self.profile.url,
+            self._api = SyncJamaApi.from_credentials(
+                base_url=self.profile.url,
                 credentials=(self.profile.username, self.profile.password),
                 oauth=False,
             )
         else:
             raise ValueError(f"Unknown auth type: {self.profile.auth_type}")
 
-    def _ensure_connected(self) -> PyJamaClient:
+    def _ensure_connected(self) -> SyncJamaApi:
         """Ensure client is connected and return it."""
-        if self._client is None:
+        if self._api is None:
             self.connect()
-        assert self._client is not None
-        return self._client
+        assert self._api is not None
+        return self._api
 
     def clear_cache(self) -> None:
         """Clear all cached data."""
@@ -319,8 +315,8 @@ class JamaClient:
                 return cached
 
         # Fetch from API
-        client = self._ensure_connected()
-        relationships = client.get_relationships(project_id)
+        api = self._ensure_connected()
+        relationships = api.get_relationships(project_id)
 
         # Cache to disk
         if self._disk_cache:
@@ -408,8 +404,8 @@ class JamaClient:
                 return items
 
         # Fetch from API
-        client = self._ensure_connected()
-        items = client.get_items(project_id)
+        api = self._ensure_connected()
+        items = api.get_items(project_id)
 
         # Cache to disk (without type filter, so cache works for all types)
         if self._disk_cache:
@@ -608,14 +604,14 @@ class JamaClient:
     @cached(ttl=300, key_prefix="projects")  # 5 minutes
     def get_projects(self) -> list[dict[str, Any]]:
         """Get all accessible projects (cached for 5 minutes)."""
-        client = self._ensure_connected()
-        return client.get_projects()
+        api = self._ensure_connected()
+        return api.get_projects()
 
     def get_project(self, project_id: int) -> dict[str, Any]:
         """Get a specific project by ID."""
-        client = self._ensure_connected()
+        api = self._ensure_connected()
         # py-jama-rest-client doesn't have get_project, so filter from get_projects
-        projects = client.get_projects()
+        projects = api.get_projects()
         for project in projects:
             if project.get("id") == project_id:
                 return project
@@ -638,13 +634,13 @@ class JamaClient:
             item_type: Optional item type ID to filter by
             max_results: Maximum number of items to return (for faster queries)
         """
-        client = self._ensure_connected()
+        api = self._ensure_connected()
 
         if max_results and max_results <= 50:
             # Use single page fetch for small limits (much faster)
             items = self._get_items_page(project_id, start_at=0, max_results=max_results)
         else:
-            items = client.get_items(project_id)
+            items = api.get_items(project_id)
 
         if item_type:
             items = [item for item in items if item.get("itemType") == item_type]
@@ -667,25 +663,18 @@ class JamaClient:
             start_at: Starting index
             max_results: Maximum items per page (max 50)
         """
-        client = self._ensure_connected()
-        # Access the underlying API directly for single page
-        resource_path = (
-            f"items?project={project_id}&startAt={start_at}&maxResults={min(max_results, 50)}"
-        )
-        response = client._JamaClient__core.get(resource_path)
-        # Parse JSON from response
-        data = response.json()
-        return data.get("data", [])
+        api = self._ensure_connected()
+        return api.get_items_page(project_id, start_at, max_results)
 
     def get_item(self, item_id: int) -> dict[str, Any]:
         """Get a specific item by ID."""
-        client = self._ensure_connected()
-        return client.get_item(item_id)
+        api = self._ensure_connected()
+        return api.get_item(item_id)
 
     def get_item_children(self, item_id: int) -> list[dict[str, Any]]:
         """Get children of an item."""
-        client = self._ensure_connected()
-        return client.get_item_children(item_id)
+        api = self._ensure_connected()
+        return api.get_item_children(item_id)
 
     def create_item(
         self,
@@ -700,8 +689,8 @@ class JamaClient:
         Returns:
             The ID of the created item
         """
-        client = self._ensure_connected()
-        return client.post_item(
+        api = self._ensure_connected()
+        return api.post_item(
             project=project_id,
             item_type_id=item_type_id,
             child_item_type_id=child_item_type_id,
@@ -711,17 +700,17 @@ class JamaClient:
 
     def update_item(self, item_id: int, fields: dict[str, Any]) -> None:
         """Update an item's fields using JSON patch."""
-        client = self._ensure_connected()
+        api = self._ensure_connected()
         patches = [
             {"op": "replace", "path": f"/fields/{field}", "value": value}
             for field, value in fields.items()
         ]
-        client.patch_item(item_id, patches)
+        api.patch_item(item_id, patches)
 
     def delete_item(self, item_id: int) -> None:
         """Delete an item."""
-        client = self._ensure_connected()
-        client.delete_item(item_id)
+        api = self._ensure_connected()
+        api.delete_item(item_id)
 
     # =========================================================================
     # Relationships
@@ -729,33 +718,33 @@ class JamaClient:
 
     def get_relationships(self, project_id: int) -> list[dict[str, Any]]:
         """Get all relationships in a project."""
-        client = self._ensure_connected()
-        return client.get_relationships(project_id)
+        api = self._ensure_connected()
+        return api.get_relationships(project_id)
 
     def get_relationship(self, relationship_id: int) -> dict[str, Any]:
         """Get a specific relationship."""
-        client = self._ensure_connected()
-        return client.get_relationship(relationship_id)
+        api = self._ensure_connected()
+        return api.get_relationship(relationship_id)
 
     def get_item_upstream_relationships(self, item_id: int) -> list[dict[str, Any]]:
         """Get upstream relationships for an item."""
-        client = self._ensure_connected()
-        return client.get_items_upstream_relationships(item_id)
+        api = self._ensure_connected()
+        return api.get_items_upstream_relationships(item_id)
 
     def get_item_downstream_relationships(self, item_id: int) -> list[dict[str, Any]]:
         """Get downstream relationships for an item."""
-        client = self._ensure_connected()
-        return client.get_items_downstream_relationships(item_id)
+        api = self._ensure_connected()
+        return api.get_items_downstream_relationships(item_id)
 
     def get_item_upstream_related(self, item_id: int) -> list[dict[str, Any]]:
         """Get upstream related items."""
-        client = self._ensure_connected()
-        return client.get_items_upstream_related(item_id)
+        api = self._ensure_connected()
+        return api.get_items_upstream_related(item_id)
 
     def get_item_downstream_related(self, item_id: int) -> list[dict[str, Any]]:
         """Get downstream related items."""
-        client = self._ensure_connected()
-        return client.get_items_downstream_related(item_id)
+        api = self._ensure_connected()
+        return api.get_items_downstream_related(item_id)
 
     def create_relationship(
         self,
@@ -768,13 +757,13 @@ class JamaClient:
         Returns:
             The ID of the created relationship
         """
-        client = self._ensure_connected()
-        return client.post_relationship(from_item, to_item, relationship_type)
+        api = self._ensure_connected()
+        return api.post_relationship(from_item, to_item, relationship_type)
 
     def delete_relationship(self, relationship_id: int) -> None:
         """Delete a relationship."""
-        client = self._ensure_connected()
-        client.delete_relationship(relationship_id)
+        api = self._ensure_connected()
+        api.delete_relationship(relationship_id)
 
     # =========================================================================
     # Item Types (cached - rarely change)
@@ -783,14 +772,14 @@ class JamaClient:
     @cached(ttl=3600, key_prefix="item_types")  # 1 hour
     def get_item_types(self) -> list[dict[str, Any]]:
         """Get all item types (cached for 1 hour)."""
-        client = self._ensure_connected()
-        return client.get_item_types()
+        api = self._ensure_connected()
+        return api.get_item_types()
 
     @cached(ttl=3600, key_prefix="item_type")  # 1 hour
     def get_item_type(self, item_type_id: int) -> dict[str, Any]:
         """Get a specific item type (cached for 1 hour)."""
-        client = self._ensure_connected()
-        return client.get_item_type(item_type_id)
+        api = self._ensure_connected()
+        return api.get_item_type(item_type_id)
 
     # =========================================================================
     # Pick Lists (cached - rarely change)
@@ -799,20 +788,20 @@ class JamaClient:
     @cached(ttl=3600, key_prefix="pick_lists")  # 1 hour
     def get_pick_lists(self) -> list[dict[str, Any]]:
         """Get all pick lists (cached for 1 hour)."""
-        client = self._ensure_connected()
-        return client.get_pick_lists()
+        api = self._ensure_connected()
+        return api.get_pick_lists()
 
     @cached(ttl=3600, key_prefix="pick_list")  # 1 hour
     def get_pick_list(self, pick_list_id: int) -> dict[str, Any]:
         """Get a specific pick list (cached for 1 hour)."""
-        client = self._ensure_connected()
-        return client.get_pick_list(pick_list_id)
+        api = self._ensure_connected()
+        return api.get_pick_list(pick_list_id)
 
     @cached(ttl=3600, key_prefix="pick_list_options")  # 1 hour
     def get_pick_list_options(self, pick_list_id: int) -> list[dict[str, Any]]:
         """Get options for a pick list (cached for 1 hour)."""
-        client = self._ensure_connected()
-        return client.get_pick_list_options(pick_list_id)
+        api = self._ensure_connected()
+        return api.get_pick_list_options(pick_list_id)
 
     # =========================================================================
     # Tags
@@ -820,13 +809,13 @@ class JamaClient:
 
     def get_tags(self, project_id: int) -> list[dict[str, Any]]:
         """Get all tags in a project."""
-        client = self._ensure_connected()
-        return client.get_tags(project_id)
+        api = self._ensure_connected()
+        return api.get_tags(project_id)
 
     def get_tagged_items(self, tag_id: int) -> list[dict[str, Any]]:
         """Get items with a specific tag."""
-        client = self._ensure_connected()
-        return client.get_tagged_items(tag_id)
+        api = self._ensure_connected()
+        return api.get_tagged_items(tag_id)
 
     # =========================================================================
     # Tests
@@ -834,13 +823,13 @@ class JamaClient:
 
     def get_test_cycle(self, test_cycle_id: int) -> dict[str, Any]:
         """Get a specific test cycle."""
-        client = self._ensure_connected()
-        return client.get_test_cycle(test_cycle_id)
+        api = self._ensure_connected()
+        return api.get_test_cycle(test_cycle_id)
 
     def get_test_runs(self, test_cycle_id: int) -> list[dict[str, Any]]:
         """Get test runs for a test cycle."""
-        client = self._ensure_connected()
-        return client.get_testruns(test_cycle_id)
+        api = self._ensure_connected()
+        return api.get_testruns(test_cycle_id)
 
     # =========================================================================
     # Users (cached - change infrequently)
@@ -849,14 +838,14 @@ class JamaClient:
     @cached(ttl=600, key_prefix="users")  # 10 minutes
     def get_users(self) -> list[dict[str, Any]]:
         """Get all users (cached for 10 minutes)."""
-        client = self._ensure_connected()
-        return client.get_users()
+        api = self._ensure_connected()
+        return api.get_users()
 
     @cached(ttl=600, key_prefix="current_user")  # 10 minutes
     def get_current_user(self) -> dict[str, Any]:
         """Get the current user (cached for 10 minutes)."""
-        client = self._ensure_connected()
-        return client.get_current_user()
+        api = self._ensure_connected()
+        return api.get_current_user()
 
     # =========================================================================
     # Baselines
@@ -864,18 +853,18 @@ class JamaClient:
 
     def get_baselines(self, project_id: int) -> list[dict[str, Any]]:
         """Get all baselines for a project."""
-        client = self._ensure_connected()
-        return client.get_baselines(project_id)
+        api = self._ensure_connected()
+        return api.get_baselines(project_id)
 
     def get_baseline(self, baseline_id: int) -> dict[str, Any]:
         """Get a specific baseline."""
-        client = self._ensure_connected()
-        return client.get_baseline(baseline_id)
+        api = self._ensure_connected()
+        return api.get_baseline(baseline_id)
 
     def get_baseline_versioned_items(self, baseline_id: int) -> list[dict[str, Any]]:
         """Get versioned items in a baseline."""
-        client = self._ensure_connected()
-        return client.get_baselines_versioneditems(baseline_id)
+        api = self._ensure_connected()
+        return api.get_baselines_versioneditems(baseline_id)
 
     # =========================================================================
     # Item Versions
@@ -883,13 +872,13 @@ class JamaClient:
 
     def get_item_versions(self, item_id: int) -> list[dict[str, Any]]:
         """Get version history for an item."""
-        client = self._ensure_connected()
-        return client.get_item_versions(item_id)
+        api = self._ensure_connected()
+        return api.get_item_versions(item_id)
 
     def get_item_version(self, item_id: int, version: int) -> dict[str, Any]:
         """Get a specific version of an item."""
-        client = self._ensure_connected()
-        return client.get_item_version(item_id, version)
+        api = self._ensure_connected()
+        return api.get_item_version(item_id, version)
 
     # =========================================================================
     # Relationship Types
@@ -898,8 +887,8 @@ class JamaClient:
     @cached(ttl=3600, key_prefix="relationship_types")  # 1 hour
     def get_relationship_types(self) -> list[dict[str, Any]]:
         """Get all relationship types (cached for 1 hour)."""
-        client = self._ensure_connected()
-        return client.get_relationship_types()
+        api = self._ensure_connected()
+        return api.get_relationship_types()
 
     # =========================================================================
     # Attachments
@@ -907,13 +896,13 @@ class JamaClient:
 
     def get_attachment(self, attachment_id: int) -> dict[str, Any]:
         """Get attachment metadata."""
-        client = self._ensure_connected()
-        return client.get_attachment(attachment_id)
+        api = self._ensure_connected()
+        return api.get_attachment(attachment_id)
 
     def get_item_tags(self, item_id: int) -> list[dict[str, Any]]:
         """Get tags for an item."""
-        client = self._ensure_connected()
-        return client.get_item_tags(item_id)
+        api = self._ensure_connected()
+        return api.get_item_tags(item_id)
 
     def download_attachment(self, attachment_id: int, output_path: Path) -> None:
         """Download attachment file content.
@@ -921,8 +910,8 @@ class JamaClient:
         Note: The py-jama-rest-client doesn't have a direct download method,
         so this gets the attachment URL and downloads via the file URL.
         """
-        client = self._ensure_connected()
-        attachment = client.get_attachment(attachment_id)
+        api = self._ensure_connected()
+        attachment = api.get_attachment(attachment_id)
 
         # Get the file URL from attachment metadata
         _file_url = attachment.get("fileName")  # This may need adjustment based on API response
@@ -950,5 +939,5 @@ class JamaClient:
         Returns:
             The ID of the created attachment
         """
-        client = self._ensure_connected()
-        return client.post_item_attachment(item_id, str(file_path))
+        api = self._ensure_connected()
+        return api.post_item_attachment(item_id, str(file_path))
