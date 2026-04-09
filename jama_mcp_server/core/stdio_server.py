@@ -7,15 +7,15 @@ compatibility with Claude Desktop, Cline, VS Code, and other MCP clients.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 
 from loguru import logger
 from mcp.server import Server
 from mcp.types import TextContent, Tool
-from py_jama_rest_client.client import JamaClient
 
+from jama_cli.core.api import JamaApi
+from jama_cli.core.http_client import JamaHttpClient
 from jama_mcp_server.models import JamaConfig
 
 
@@ -30,7 +30,8 @@ class JamaStdioMCPServer:
             config: Jama configuration
         """
         self.config = config
-        self.jama_client: JamaClient | None = None
+        self._api: JamaApi | None = None
+        self._http: JamaHttpClient | None = None
         self.mcp = Server("jama-mcp-server")
 
         # Register request handlers
@@ -417,7 +418,7 @@ class JamaStdioMCPServer:
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
             """Execute a tool with the given arguments."""
             try:
-                if not self.jama_client:
+                if not self._api:
                     raise RuntimeError("Jama client not initialized")
 
                 result = await self._execute_tool(name, arguments)
@@ -429,49 +430,26 @@ class JamaStdioMCPServer:
                 return [TextContent(type="text", text=json.dumps({"error": str(e), "tool": name}))]
 
     async def _execute_tool(self, name: str, arguments: dict[str, Any]) -> Any:
-        """Execute the specified tool with arguments.
-
-        Args:
-            name: Tool name to execute
-            arguments: Tool arguments
-
-        Returns:
-            Tool execution result
-
-        Raises:
-            ValueError: If tool is unknown
-            RuntimeError: If Jama client is not initialized
-        """
-        if not self.jama_client:
+        """Execute the specified tool with arguments."""
+        if not self._api:
             raise RuntimeError("Jama client not initialized")
 
-        # Run synchronous Jama client methods in executor
-        loop = asyncio.get_running_loop()
+        api = self._api
 
         if name == "get_projects":
-            return await loop.run_in_executor(None, self.jama_client.get_projects)
+            return await api.get_projects()
 
         elif name == "get_project":
-
-            def get_single_project() -> Any:
-                projects = self.jama_client.get_projects()  # type: ignore[union-attr]
-                project_id = arguments["project_id"]
-                return next((p for p in projects if p["id"] == project_id), None)
-
-            return await loop.run_in_executor(None, get_single_project)
+            return await api.get_project(arguments["project_id"])
 
         elif name == "get_item":
-            return await loop.run_in_executor(None, self.jama_client.get_item, arguments["item_id"])
+            return await api.get_item(arguments["item_id"])
 
         elif name == "get_items":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_items, arguments["project_id"]
-            )
+            return await api.get_items(arguments["project_id"])
 
         elif name == "create_item":
-            return await loop.run_in_executor(
-                None,
-                self.jama_client.post_item,
+            return await api.post_item(
                 arguments["project_id"],
                 arguments["item_type_id"],
                 arguments.get("child_item_type_id"),
@@ -480,144 +458,90 @@ class JamaStdioMCPServer:
             )
 
         elif name == "update_item":
-            # Use patch_item for updates
-            def update_fn() -> Any:
-                patches = []
-                for field, value in arguments["fields"].items():
-                    patches.append({"op": "replace", "path": f"/fields/{field}", "value": value})
-                return self.jama_client.patch_item(arguments["item_id"], patches)
-
-            return await loop.run_in_executor(None, update_fn)
+            patches = [
+                {"op": "replace", "path": f"/fields/{field}", "value": value}
+                for field, value in arguments["fields"].items()
+            ]
+            return await api.patch_item(arguments["item_id"], patches)
 
         elif name == "delete_item":
-            return await loop.run_in_executor(
-                None, self.jama_client.delete_item, arguments["item_id"]
-            )
+            return await api.delete_item(arguments["item_id"])
 
         elif name == "get_item_children":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_item_children, arguments["item_id"]
-            )
+            return await api.get_item_children(arguments["item_id"])
 
         elif name == "get_relationship_types":
-            return await loop.run_in_executor(None, self.jama_client.get_relationship_types)
+            return await api.get_relationship_types()
 
         elif name == "get_item_upstream_relationships":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_items_upstream_relationships, arguments["item_id"]
-            )
+            return await api.get_items_upstream_relationships(arguments["item_id"])
 
         elif name == "get_item_downstream_relationships":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_items_downstream_relationships, arguments["item_id"]
-            )
+            return await api.get_items_downstream_relationships(arguments["item_id"])
 
         elif name == "get_tags":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_tags, arguments["project_id"]
-            )
+            return await api.get_tags(arguments["project_id"])
 
         elif name == "get_item_type":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_item_type, arguments["item_type_id"]
-            )
+            return await api.get_item_type(arguments["item_type_id"])
 
         elif name == "get_pick_lists":
-            return await loop.run_in_executor(None, self.jama_client.get_pick_lists)
+            return await api.get_pick_lists()
 
         elif name == "get_baselines":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_baselines, arguments["project_id"]
-            )
+            return await api.get_baselines(arguments["project_id"])
 
         elif name == "get_baseline":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_baseline, arguments["baseline_id"]
-            )
+            return await api.get_baseline(arguments["baseline_id"])
 
         elif name == "get_current_user":
-            return await loop.run_in_executor(None, self.jama_client.get_current_user)
+            return await api.get_current_user()
 
         elif name == "get_users":
-            return await loop.run_in_executor(None, self.jama_client.get_users)
+            return await api.get_users()
 
         elif name == "get_item_versions":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_item_versions, arguments["item_id"]
-            )
+            return await api.get_item_versions(arguments["item_id"])
 
         elif name == "get_item_tags":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_item_tags, arguments["item_id"]
-            )
+            return await api.get_item_tags(arguments["item_id"])
 
         elif name == "post_item_tag":
-            return await loop.run_in_executor(
-                None, self.jama_client.post_item_tag, arguments["item_id"], arguments["tag_id"]
-            )
+            return await api.post_item_tag(arguments["item_id"], arguments["tag_id"])
 
         elif name == "get_item_workflow_transitions":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_item_workflow_transitions, arguments["item_id"]
-            )
+            return await api.get_item_workflow_transitions(arguments["item_id"])
 
         elif name == "get_attachment":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_attachment, arguments["attachment_id"]
-            )
+            return await api.get_attachment(arguments["attachment_id"])
 
         elif name == "get_filter_results":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_filter_results, arguments["filter_id"]
-            )
+            return await api.get_filter_results(arguments["filter_id"])
 
         elif name == "create_relationship":
-            return await loop.run_in_executor(
-                None,
-                self.jama_client.post_relationship,
+            return await api.post_relationship(
                 arguments["from_item"],
                 arguments["to_item"],
                 arguments.get("relationship_type"),
             )
 
         elif name == "create_test_plan":
-
-            def _create_test_plan() -> int:
-                """Bypass py_jama_rest_client (no upstream method) — POST /testplans directly."""
-                fields: dict[str, Any] = {"name": arguments["name"]}
-                if arguments.get("description"):
-                    fields["description"] = arguments["description"]
-                if arguments.get("start_date"):
-                    fields["startDate"] = arguments["start_date"]
-                if arguments.get("end_date"):
-                    fields["endDate"] = arguments["end_date"]
-
-                body = {"project": arguments["project_id"], "fields": fields}
-                headers = {"content-type": "application/json"}
-                response = self.jama_client._JamaClient__core.post(  # type: ignore[union-attr]
-                    "testplans", data=json.dumps(body), headers=headers
-                )
-                if not (200 <= response.status_code < 300):
-                    msg = response.json().get("meta", {}).get("message", "Unknown error")
-                    raise RuntimeError(f"POST testplans failed [{response.status_code}]: {msg}")
-                return int(response.json()["meta"]["id"])
-
-            return await loop.run_in_executor(None, _create_test_plan)
+            return await api.create_test_plan(
+                arguments["project_id"],
+                arguments["name"],
+                arguments.get("description"),
+                arguments.get("start_date"),
+                arguments.get("end_date"),
+            )
 
         elif name == "get_test_cycle":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_test_cycle, arguments["test_cycle_id"]
-            )
+            return await api.get_test_cycle(arguments["test_cycle_id"])
 
         elif name == "get_test_runs":
-            return await loop.run_in_executor(
-                None, self.jama_client.get_testruns, arguments["test_cycle_id"]
-            )
+            return await api.get_testruns(arguments["test_cycle_id"])
 
         elif name == "create_test_cycle":
-            return await loop.run_in_executor(
-                None,
-                self.jama_client.post_testplans_testcycles,
+            return await api.post_testplans_testcycles(
                 arguments["testplan_id"],
                 arguments["name"],
                 arguments["start_date"],
@@ -627,58 +551,51 @@ class JamaStdioMCPServer:
             )
 
         elif name == "update_test_run":
-            return await loop.run_in_executor(
-                None,
-                self.jama_client.put_test_run,
-                arguments["test_run_id"],
-                arguments["data"],
-            )
+            return await api.put_test_run(arguments["test_run_id"], arguments["data"])
 
         else:
             raise ValueError(f"Unknown tool: {name}")
 
-    async def initialize_client(self):
-        """Initialize the Jama client."""
+    async def initialize_client(self) -> None:
+        """Initialize the async Jama HTTP client and API."""
         try:
             logger.info(f"Initializing Jama client for {self.config.url}")
 
-            # Use OAuth client credentials if provided
             if self.config.client_id and self.config.client_secret:
                 logger.info("Using OAuth client credentials authentication")
-                self.jama_client = JamaClient(
-                    host_domain=self.config.url,
-                    credentials=(self.config.client_id, self.config.client_secret),
-                    oauth=True,
-                )
-            # Use API key if provided
+                credentials = (self.config.client_id, self.config.client_secret)
+                oauth = True
             elif self.config.api_key:
                 logger.info("Using API key authentication")
-                self.jama_client = JamaClient(
-                    host_domain=self.config.url, credentials=(self.config.api_key,)
-                )
-            # Fall back to username/password
+                credentials = (self.config.api_key, "")
+                oauth = False
             else:
                 logger.info("Using username/password authentication")
-                self.jama_client = JamaClient(
-                    host_domain=self.config.url,
-                    credentials=(self.config.username, self.config.password),
-                    oauth=self.config.oauth,
-                )
+                credentials = (self.config.username, self.config.password)
+                oauth = self.config.oauth
 
+            self._http = JamaHttpClient(
+                base_url=self.config.url,
+                credentials=credentials,
+                oauth=oauth,
+            )
+            self._api = JamaApi(self._http)
             logger.info("Jama client initialized successfully")
 
         except Exception as e:
             logger.error(f"Failed to initialize Jama client: {e}")
             raise
 
-    async def run(self):
+    async def run(self) -> None:
         """Run the stdio MCP server."""
         from mcp.server.stdio import stdio_server
 
-        # Initialize Jama client
         await self.initialize_client()
-
         logger.info("Starting Jama stdio MCP server")
 
-        async with stdio_server() as (read_stream, write_stream):
-            await self.mcp.run(read_stream, write_stream, self.mcp.create_initialization_options())
+        try:
+            async with stdio_server() as (read_stream, write_stream):
+                await self.mcp.run(read_stream, write_stream, self.mcp.create_initialization_options())
+        finally:
+            if self._http:
+                await self._http.close()

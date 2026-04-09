@@ -122,7 +122,7 @@ class TestJamaClientCaching:
         mock_jama_client = MagicMock()
         mock_jama_client.get_item_types.return_value = [{"id": 1, "name": "Test"}]
 
-        with patch.object(client, "_client", mock_jama_client):
+        with patch.object(client, "_api", mock_jama_client):
             # First call - should hit the API
             result1 = client.get_item_types()
 
@@ -141,7 +141,7 @@ class TestJamaClientCaching:
         # Set a very short TTL for testing
         client._cache.set("projects:():[]", [{"id": 1}], ttl=0)
 
-        with patch.object(client, "_client", mock_jama_client):
+        with patch.object(client, "_api", mock_jama_client):
             time.sleep(0.01)  # Wait for cache to expire
 
             # Should call API because cache expired
