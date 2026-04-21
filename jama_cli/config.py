@@ -148,43 +148,46 @@ def get_profile(profile_name: str | None = None) -> JamaProfile | None:
 
 
 def get_profile_or_env(profile_name: str | None = None) -> JamaProfile | None:
-    """Get a profile by name, or create one from environment variables.
+    """Get a profile from environment variables, or fall back to config file.
 
-    This allows using JAMA_URL, JAMA_API_KEY etc. without a config file.
+    Environment variables take precedence over the config file when JAMA_URL
+    is set, following the standard convention (like AWS_ACCESS_KEY_ID overriding
+    ~/.aws/credentials). This is critical for MCP server usage where mcp.json
+    passes credentials as env vars.
     """
-    # First try config file
+    # Check environment variables first (they take precedence)
+    jama_url = os.environ.get("JAMA_URL")
+    if jama_url:
+        api_key = os.environ.get("JAMA_API_KEY")
+        client_id = os.environ.get("JAMA_CLIENT_ID")
+        client_secret = os.environ.get("JAMA_CLIENT_SECRET")
+        username = os.environ.get("JAMA_USERNAME")
+        password = os.environ.get("JAMA_PASSWORD")
+
+        # Determine auth type
+        if api_key:
+            auth_type = "api_key"
+        elif client_id and client_secret:
+            auth_type = "oauth"
+        elif username and password:
+            auth_type = "basic"
+        else:
+            auth_type = None
+
+        if auth_type:
+            return JamaProfile(
+                url=jama_url,
+                auth_type=auth_type,
+                api_key=api_key,
+                client_id=client_id,
+                client_secret=client_secret,
+                username=username,
+                password=password,
+            )
+
+    # Fall back to config file
     profile = get_profile(profile_name)
     if profile and profile.has_valid_credentials():
         return profile
 
-    # Fall back to environment variables
-    jama_url = os.environ.get("JAMA_URL")
-    if not jama_url:
-        return profile  # Return config profile even if invalid
-
-    # Create profile from env vars
-    api_key = os.environ.get("JAMA_API_KEY")
-    client_id = os.environ.get("JAMA_CLIENT_ID")
-    client_secret = os.environ.get("JAMA_CLIENT_SECRET")
-    username = os.environ.get("JAMA_USERNAME")
-    password = os.environ.get("JAMA_PASSWORD")
-
-    # Determine auth type
-    if api_key:
-        auth_type = "api_key"
-    elif client_id and client_secret:
-        auth_type = "oauth"
-    elif username and password:
-        auth_type = "basic"
-    else:
-        return profile
-
-    return JamaProfile(
-        url=jama_url,
-        auth_type=auth_type,
-        api_key=api_key,
-        client_id=client_id,
-        client_secret=client_secret,
-        username=username,
-        password=password,
-    )
+    return profile

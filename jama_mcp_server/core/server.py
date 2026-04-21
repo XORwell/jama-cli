@@ -701,7 +701,6 @@ All API endpoints are relative to the server base URL (default: http://localhost
             required_fields = [
                 "project_id",
                 "item_type_id",
-                "child_item_type_id",
                 "location",
                 "fields",
             ]
@@ -713,7 +712,7 @@ All API endpoints are relative to the server base URL (default: http://localhost
                 return self.jama_client.post_item(
                     project=params["project_id"],
                     item_type_id=params["item_type_id"],
-                    child_item_type_id=params["child_item_type_id"],
+                    child_item_type_id=params.get("child_item_type_id"),
                     location=params["location"],
                     fields=params["fields"],
                 )

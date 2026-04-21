@@ -7,6 +7,6 @@ with MCP (Model Context Protocol) server capabilities.
 
 from __future__ import annotations
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"
 __author__ = "XORwell"
 __license__ = "MIT"

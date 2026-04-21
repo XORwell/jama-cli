@@ -311,6 +311,89 @@ class TestGetProfileOrEnv:
                 assert profile is not None
                 assert profile.api_key == "mykey"
 
+    def test_env_vars_override_config_file(self):
+        """Test that env vars take precedence over config file profiles."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yml"
+            config_path.write_text(
+                """
+default_profile: default
+profiles:
+  default:
+    url: https://sandbox.jamacloud.com
+    auth_type: oauth
+    client_id: sandbox_client
+    client_secret: sandbox_secret
+"""
+            )
+            with (
+                patch("jama_cli.config.get_config_path", return_value=config_path),
+                patch.dict(
+                    os.environ,
+                    {
+                        "JAMA_URL": "https://production.jamacloud.com",
+                        "JAMA_CLIENT_ID": "prod_client",
+                        "JAMA_CLIENT_SECRET": "prod_secret",
+                    },
+                ),
+            ):
+                profile = get_profile_or_env(None)
+                assert profile is not None
+                assert profile.url == "https://production.jamacloud.com"
+                assert profile.client_id == "prod_client"
+                assert profile.client_secret == "prod_secret"
+
+    def test_config_file_used_when_no_env_vars(self):
+        """Test that config file is used when env vars are not set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yml"
+            config_path.write_text(
+                """
+default_profile: default
+profiles:
+  default:
+    url: https://sandbox.jamacloud.com
+    auth_type: oauth
+    client_id: sandbox_client
+    client_secret: sandbox_secret
+"""
+            )
+            with (
+                patch("jama_cli.config.get_config_path", return_value=config_path),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                profile = get_profile_or_env(None)
+                assert profile is not None
+                assert profile.url == "https://sandbox.jamacloud.com"
+                assert profile.client_id == "sandbox_client"
+
+    def test_env_url_without_credentials_falls_back_to_config(self):
+        """Test that JAMA_URL alone (without credentials) falls back to config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.yml"
+            config_path.write_text(
+                """
+default_profile: default
+profiles:
+  default:
+    url: https://sandbox.jamacloud.com
+    auth_type: api_key
+    api_key: sandbox_key
+"""
+            )
+            with (
+                patch("jama_cli.config.get_config_path", return_value=config_path),
+                patch.dict(
+                    os.environ,
+                    {"JAMA_URL": "https://production.jamacloud.com"},
+                    clear=True,
+                ),
+            ):
+                profile = get_profile_or_env(None)
+                assert profile is not None
+                # Falls back to config because JAMA_URL alone has no credentials
+                assert profile.url == "https://sandbox.jamacloud.com"
+
     def test_no_profile_no_env(self):
         """Test when no profile and no env vars."""
         with tempfile.TemporaryDirectory() as tmpdir:
