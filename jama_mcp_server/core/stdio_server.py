@@ -104,7 +104,10 @@ class JamaStdioMCPServer:
                                     'or {"project": 42} for project root'
                                 ),
                             },
-                            "fields": {"type": "object", "description": "Item fields (name, description, etc.)"},
+                            "fields": {
+                                "type": "object",
+                                "description": "Item fields (name, description, etc.)",
+                            },
                         },
                         "required": ["project_id", "item_type_id", "location", "fields"],
                     },
@@ -595,7 +598,9 @@ class JamaStdioMCPServer:
 
         try:
             async with stdio_server() as (read_stream, write_stream):
-                await self.mcp.run(read_stream, write_stream, self.mcp.create_initialization_options())
+                await self.mcp.run(
+                    read_stream, write_stream, self.mcp.create_initialization_options()
+                )
         finally:
             if self._http:
                 await self._http.close()

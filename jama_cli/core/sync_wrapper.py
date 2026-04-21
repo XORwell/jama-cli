@@ -101,7 +101,9 @@ class SyncJamaApi:
         global_id: str | None = None,
     ) -> int:
         return self._run(
-            self._api.post_item(project, item_type_id, child_item_type_id, location, fields, global_id)
+            self._api.post_item(
+                project, item_type_id, child_item_type_id, location, fields, global_id
+            )
         )
 
     def patch_item(self, item_id: int, patches: list[dict[str, Any]]) -> int:
@@ -235,8 +237,12 @@ class SyncJamaApi:
     ) -> int:
         return self._run(
             self._api.post_testplans_testcycles(
-                testplan_id, testcycle_name, start_date, end_date,
-                testgroups_to_include, testrun_status_to_include,
+                testplan_id,
+                testcycle_name,
+                start_date,
+                end_date,
+                testgroups_to_include,
+                testrun_status_to_include,
             )
         )
 

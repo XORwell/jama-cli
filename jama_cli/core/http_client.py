@@ -152,8 +152,10 @@ class JamaHttpClient:
 
                 if response.status_code == 429:
                     if attempt < max_retries:
-                        retry_after = float(response.headers.get("Retry-After", 2 ** attempt))
-                        logger.warning(f"Rate limited, retrying in {retry_after}s (attempt {attempt + 1})")
+                        retry_after = float(response.headers.get("Retry-After", 2**attempt))
+                        logger.warning(
+                            f"Rate limited, retrying in {retry_after}s (attempt {attempt + 1})"
+                        )
                         await asyncio.sleep(retry_after)
                         continue
                     self._raise_for_status(response)
@@ -190,9 +192,7 @@ class JamaHttpClient:
             raise AlreadyExistsException(message, status_code=code)
         if code == 429:
             retry_after = float(response.headers.get("Retry-After", 0)) or None
-            raise TooManyRequestsException(
-                message, status_code=code, retry_after=retry_after
-            )
+            raise TooManyRequestsException(message, status_code=code, retry_after=retry_after)
         if 400 <= code < 500:
             raise APIClientException(message, status_code=code)
         if 500 <= code < 600:
@@ -206,7 +206,9 @@ class JamaHttpClient:
         response = await self._request("GET", path, params=params)
         return response.json()
 
-    async def post(self, path: str, json: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    async def post(
+        self, path: str, json: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
         """POST to a resource. Returns the response JSON."""
         response = await self._request("POST", path, json=json, **kwargs)
         return response.json()
@@ -228,7 +230,9 @@ class JamaHttpClient:
 
     # --- Pagination ---
 
-    async def get_all(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def get_all(
+        self, path: str, params: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """GET all pages of a paginated resource.
 
         Uses page size 50 (API max) instead of py_jama_rest_client's hardcoded 20.
