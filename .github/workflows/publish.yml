@@ -74,3 +74,47 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  publish-github-release:
+    needs: [publish-pypi, publish-docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # need full history to resolve previous tag
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_LC: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          REPO_LC_LOWER="${REPO_LC,,}"
+
+          # Pull this version's section from CHANGELOG.md, if present
+          NOTES=$(awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {flag=1; next}
+            /^## \[/ {flag=0}
+            flag {print}
+          ' CHANGELOG.md || true)
+          if [ -z "$(echo "${NOTES:-}" | tr -d '[:space:]')" ]; then
+            NOTES="Release ${GITHUB_REF_NAME}. See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md)."
+          fi
+
+          # Resolve previous tag for the compare link (if any)
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            COMPARE_LINE="**Full changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${GITHUB_REF_NAME}"
+          else
+            COMPARE_LINE=""
+          fi
+
+          FULL_NOTES=$(printf '%s\n\n### Install\n- PyPI: `pip install jama-cli==%s`\n- Docker: `ghcr.io/%s:%s`\n\n%s\n' \
+            "$NOTES" "$VERSION" "$REPO_LC_LOWER" "$VERSION" "$COMPARE_LINE")
+
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "$FULL_NOTES"

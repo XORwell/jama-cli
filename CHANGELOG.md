@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-04-21
+
+### Added
+- Test management tools in the stdio MCP server (test cycles, test runs, etc.)
+- Project-specific `CLAUDE.md` for agent context
+
+### Changed
+- Replaced `py_jama_rest_client` with an async `httpx`-based client
+  - Concurrent requests via `asyncio`; honest rate-limit handling (`Retry-After`)
+  - `get_all()` now fetches at the API max page size of 50 (was 20)
+
+### Fixed
+- Environment variables (`JAMA_URL`, `JAMA_CLIENT_ID`, `JAMA_CLIENT_SECRET`) now
+  override values from `config.yml` instead of being overridden by them
+- `create_item`: `child_item_type_id` is now optional
+
 ## [0.1.3] - 2026-03-10
 
 ### Fixed
@@ -75,4 +91,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.4]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.4
+[0.1.3]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.3
 [0.1.0]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.0
