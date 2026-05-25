@@ -1,0 +1,29 @@
+# Final stub release of jama-cli.
+# Replace the live pyproject.toml with this file for the deprecation release.
+# Bump version to something clearly final (e.g. 0.1.99 or 1.0.0.post0).
+
+[tool.poetry]
+name = "jama-cli"
+version = "0.1.99"
+description = "Deprecated — moved to reqconnect. Run `pip install reqconnect`."
+authors = ["Christian Nennemann <contact@nennemann.de>"]
+readme = "README.deprecated.md"
+license = "MIT"
+repository = "https://github.com/XORwell/reqconnect"
+keywords = ["deprecated", "moved", "reqconnect"]
+classifiers = [
+    "Development Status :: 7 - Inactive",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+]
+packages = [{include = "jama_cli"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.scripts]
+jama = "jama_cli._deprecated:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
