@@ -3,7 +3,7 @@
 # ========================================
 # Build stage - Install dependencies
 # ========================================
-FROM python:3.11-slim as builder
+FROM python:3.16-rc-slim-trixie as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -40,7 +40,7 @@ RUN poetry install --only main --no-interaction --no-ansi
 # ========================================
 # Production stage - Minimal runtime image
 # ========================================
-FROM python:3.11-slim as production
+FROM python:3.16-rc-slim-trixie as production
 
 # Create non-root user for security
 RUN groupadd --gid 1000 appgroup && \
@@ -82,7 +82,7 @@ CMD ["jama", "serve", "--host", "0.0.0.0", "--port", "8000"]
 # ========================================
 # Development stage - With dev dependencies
 # ========================================
-FROM python:3.11-slim as development
+FROM python:3.16-rc-slim-trixie as development
 
 # Install development tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
