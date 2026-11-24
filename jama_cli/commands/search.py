@@ -9,7 +9,14 @@ import typer
 
 from jama_cli.config import get_profile_or_env
 from jama_cli.core.client import JamaClient
-from jama_cli.output import OutputFormat, console, format_output, print_error
+from jama_cli.output import (
+    OutputFormat,
+    console,
+    error_console,
+    format_output,
+    print_error,
+    print_hint,
+)
 
 app = typer.Typer(name="search", help="Search for items in Jama")
 
@@ -72,7 +79,7 @@ def search_items(
         client = JamaClient(profile)
 
         # Get items to search
-        console.print(f"[dim]Searching for '{query}' in {field}...[/dim]")
+        print_hint(f"Searching for '{query}' in {field}...")
 
         if project_id:
             items = client.get_items(project_id, item_type=item_type)
@@ -102,13 +109,15 @@ def search_items(
         # Apply limit
         if len(matches) > limit:
             matches = matches[:limit]
-            console.print(f"[dim]Showing first {limit} results. Use --limit to change.[/dim]")
+            print_hint(f"Showing first {limit} results. Use --limit to change.")
 
         if not matches:
-            console.print(f"[yellow]No items found matching '{query}'[/yellow]")
+            error_console.print(f"[yellow]No items found matching '{query}'[/yellow]")
+            if output_format != OutputFormat.TABLE:
+                format_output([], format=output_format)
             return
 
-        console.print(f"[green]Found {len(matches)} matching items[/green]\n")
+        error_console.print(f"[green]Found {len(matches)} matching items[/green]\n")
 
         # Determine display columns
         columns = ["id", "documentKey", "name", "itemType", "project"]

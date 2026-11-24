@@ -38,23 +38,52 @@ user with `icacls`), directory 0700.
 
 ## Refresh sequence
 
-For each request, on a session-rejected response (401 without "permission" in `meta.message`,
-or a 3xx whose `Location` contains `/login`, `/saml` or `j_acegi`), each step at most once:
+Jama checks the `jama-csrf-token` header on every call, reads included. A request can therefore
+be turned down for two different reasons:
 
-1. Non-GET only: one authenticated GET (`users/current`); take `jama-csrf-token` from its
-   `Set-Cookie` (else from the cookie already held), update header and cookie, save, retry.
+- CSRF problem, session alive: 401 whose `meta.message` contains "csrf" (any case; Jama sends
+  "CSRF Exception" for a wrong or missing header);
+- dead session: 401 with an empty or other message, or a 3xx whose `Location` contains
+  `/login`, `/saml` or `j_acegi`.
+
+A 401 that mentions "permission" is neither. It is returned to the caller immediately and never
+causes a retry or a login.
+
+For each request that is turned down, each step runs at most once:
+
+1. CSRF repair, for every HTTP method:
+   1. if the `jama-csrf-token` cookie holds a different value than the header that was sent,
+      use the cookie's value as the header, save, retry;
+   2. otherwise, or if that was not enough: one authenticated GET (`users/current`) that sends
+      the cookie's value as the header, never the header that was just rejected. Take over its
+      `Set-Cookie`, save, retry. A write that was turned down *without* a CSRF message also
+      gets this step; a read that looks like a dead session skips it, because the GET could
+      only confirm that.
 2. Re-read the store. If it holds a different session than the one that just failed, retry
    with it.
 3. Take the lock and re-read the store. If it now holds a different session and that one passes
    the probe, use it. Otherwise log in (respecting `login_interactive`), save, retry.
-4. Still rejected: `UnauthorizedException` telling the user to run `jama login`.
+4. Still turned down: `UnauthorizedException` telling the user to run `jama login`.
 
-A 401 that mentions "permission" is returned to the caller immediately.
+One deliberate rule: if the GET in step 1.2 is accepted, the session is proven alive and holds
+the current token, so the result of the retry is final and steps 2 and 3 are skipped. Logging in
+again could not fix a request that a live session with a fresh token cannot perform, and it
+would cost the user an interactive login. Steps 2 and 3 run when that GET is turned down too.
 
-One deliberate deviation from a literal reading of the sequence: if the GET in step 1 succeeds,
-the session is proven alive, so the result of the retried write is final and steps 2 and 3 are
-skipped. Logging in again could not fix a write that a live session with a fresh token cannot
-perform, and it would cost the user an interactive login.
+### Cookies set by ordinary responses
+
+`Set-Cookie` is taken over from every response, not only from the probe, in case Jama replaces
+`jama-csrf-token` or `JSESSIONID` during a session:
+
+- a response that accepted the request: all cookies;
+- a CSRF rejection: only `jama-csrf-token`;
+- a dead-session response: nothing, since the anonymous `JSESSIONID` it may carry must not
+  replace the stored session.
+
+A change is saved under the lock with the usual atomic write, and only if the store still holds
+the session being updated (same `JSESSIONID` as before the change). An update therefore never
+overwrites a newer login from another process and never brings back a session that was logged
+out.
 
 ## Login
 
@@ -64,14 +93,29 @@ the cookies of the browser context, ignores the landing URL, and tolerates page 
 errors during the SAML redirect chain. Headless is tried first when a browser profile exists;
 a visible login form, or 20 s without a session, switches to a visible window.
 
-## Not verified against a real Jama instance
+## Verified against a real Jama instance
 
-Everything above was tested against a fake Jama built from the stated facts
-(`tests/fake_jama.py`), not against a real instance. To check on the real one:
+Checked against a Jama Cloud instance with SSO on 2026-11-24:
 
-- that `rest/v1` accepts the web session cookies plus the `jama-csrf-token` header;
-- the SSO button selectors and the login page path `login.req`;
-- that `JSESSIONID` stays valid when used from outside the browser (some setups bind sessions
-  to a client IP or user agent);
-- how a dead session really looks (401 message text, redirect targets);
-- that `logout.req` with the CSRF header releases the seat.
+- `rest/v1` accepts the web session cookies plus the `jama-csrf-token` header (GET, POST, PUT,
+  DELETE);
+- the CSRF header is required on every call, reads included; a wrong or missing one gives
+  401 "CSRF Exception";
+- the SSO button is recognised and the login through the login page works (tested under WSLg);
+- `JSESSIONID` works outside the browser (other process, other user agent);
+- a dead session is a 401 with an empty `meta.message` and no redirect;
+- `logout.req` with the CSRF header ends the session on the server (the old cookies get a 401
+  afterwards);
+- a successful DELETE answers with an empty body.
+
+## Still open
+
+The automated tests run against a fake Jama (`tests/fake_jama.py`) that reproduces the
+behaviour above. Not known yet:
+
+- whether the logout frees the floating license seat at once (only visible to a Jama admin on
+  the license page);
+- whether Jama replaces the CSRF token or `JSESSIONID` during a long session. The client takes
+  over such a change if it arrives as `Set-Cookie`; whether a CSRF rejection carries the new
+  token is not known, so the fake covers both cases;
+- how long Jama's idle timeout is.

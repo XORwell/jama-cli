@@ -83,6 +83,9 @@ class ProbeResult:
     ok: bool
     username: str | None = None
     status_code: int | None = None
+    # The probe changed the session (new cookie or CSRF token); callers that
+    # keep the session should save it.
+    changed: bool = False
 
 
 def response_message(response: httpx.Response) -> str:
@@ -98,37 +101,59 @@ def response_message(response: httpx.Response) -> str:
     return message if isinstance(message, str) else ""
 
 
+def is_csrf_rejected(response: httpx.Response) -> bool:
+    """True if the response is a CSRF token problem on a live session.
+
+    Jama checks the ``jama-csrf-token`` header on every call, reads included,
+    and answers a wrong or missing one with a 401 "CSRF Exception". The session
+    itself is fine; only the token has to be repaired.
+    """
+    return response.status_code == 401 and "csrf" in response_message(response).lower()
+
+
 def is_session_rejected(response: httpx.Response) -> bool:
     """True if the response means the web session is dead or not accepted.
 
     - 3xx whose ``Location`` points at the login/SAML machinery, or
     - 401 with an empty or generic message.
 
-    A 401 whose message mentions "permission" is a missing permission on a
-    perfectly valid session and must never trigger a re-login.
+    Two kinds of 401 are *not* a dead session: a message mentioning
+    "permission" is a missing permission on a perfectly valid session and must
+    never trigger a re-login, and a message mentioning "csrf" is a token
+    problem (see :func:`is_csrf_rejected`).
     """
     code = response.status_code
     if 300 <= code < 400:
         location = response.headers.get("Location", "").lower()
         return any(marker in location for marker in _LOGIN_REDIRECT_MARKERS)
     if code == 401:
-        return "permission" not in response_message(response).lower()
+        message = response_message(response).lower()
+        return "permission" not in message and "csrf" not in message
     return False
 
 
-def merge_response_cookies(session: StoredSession, response: httpx.Response) -> bool:
+def is_auth_rejected(response: httpx.Response) -> bool:
+    """True if the request was not accepted for either reason: dead session or CSRF."""
+    return is_session_rejected(response) or is_csrf_rejected(response)
+
+
+def merge_response_cookies(
+    session: StoredSession, response: httpx.Response, csrf_only: bool = False
+) -> bool:
     """Fold ``Set-Cookie`` headers of a response into the session.
 
     Returns True if the session changed. A new ``jama-csrf-token`` cookie also
-    updates the header value, since Jama compares the two.
+    updates the header value, since Jama compares the two. With ``csrf_only``
+    every other cookie is ignored; that is the safe choice for a response that
+    did not accept the request.
     """
     changed = False
     for cookie in response.cookies.jar:
-        if cookie.value is None:
+        if not cookie.value:
             continue
         if cookie.name == CSRF_COOKIE:
             changed = session.set_csrf(cookie.value) or changed
-        else:
+        elif not csrf_only:
             changed = (
                 session.set_cookie(cookie.name, cookie.value, cookie.domain, cookie.path) or changed
             )
@@ -153,29 +178,53 @@ async def probe(
     presence of cookies proves nothing. The only proof is an authenticated REST
     call: ``users/current`` (which also tells us who we are), falling back to
     ``projects?maxResults=1`` on instances where that endpoint is unavailable.
+
+    The CSRF header is checked on reads too. If the probe is answered with a
+    CSRF rejection, the token is taken from the ``jama-csrf-token`` cookie
+    (including one the rejection itself may have set) and the probe is sent
+    once more. ``session`` is updated in place; ``changed`` reports that.
     """
     api = f"{base_url.rstrip('/')}/rest/v1/"
-    headers = {"Accept": "application/json", **session.auth_headers()}
+    changed = False
+
+    async def get(client: httpx.AsyncClient, resource: str, **kwargs: Any) -> httpx.Response:
+        nonlocal changed
+        retried = False
+        while True:
+            sent_token = session.csrf_token
+            headers = {"Accept": "application/json", **session.auth_headers()}
+            response = await client.get(api + resource, headers=headers, **kwargs)
+            # httpx would otherwise replay collected cookies next to our header.
+            client.cookies.clear()
+            if response.status_code == 200:
+                changed = merge_response_cookies(session, response) or changed
+                return response
+            if is_csrf_rejected(response) and not retried:
+                merge_response_cookies(session, response, csrf_only=True)
+                if session.adopt_cookie_csrf(sent_token):
+                    changed = True
+                    retried = True
+                    continue
+            return response
+
     async with _new_client(transport) as client:
         try:
-            response = await client.get(api + "users/current", headers=headers)
+            response = await get(client, "users/current")
             if response.status_code == 200:
-                merge_response_cookies(session, response)
                 username = None
                 try:
                     data = response.json().get("data", {})
                     username = data.get("username") if isinstance(data, dict) else None
                 except (ValueError, AttributeError):
                     pass
-                return ProbeResult(True, username, 200)
-            if is_session_rejected(response):
-                return ProbeResult(False, None, response.status_code)
+                return ProbeResult(True, username, 200, changed)
+            if is_auth_rejected(response):
+                return ProbeResult(False, None, response.status_code, changed)
 
-            response = await client.get(api + "projects", params={"maxResults": 1}, headers=headers)
+            response = await get(client, "projects", params={"maxResults": 1})
             if response.status_code == 200:
-                merge_response_cookies(session, response)
-                return ProbeResult(True, None, 200)
-            return ProbeResult(False, None, response.status_code)
+                return ProbeResult(True, None, 200, changed)
+            return ProbeResult(False, None, response.status_code, changed)
         except httpx.HTTPError as e:
             raise CoreException(f"Could not reach Jama at {base_url}: {type(e).__name__}") from e
 
@@ -321,12 +370,50 @@ class SessionManager:
             self._loaded = True
         return self._session
 
-    async def persist(self) -> None:
-        """Write the in-memory session back to the shared store."""
-        if self._session is None:
-            return
+    async def persist(self, session: StoredSession, session_id: str | None = None) -> bool:
+        """Write an updated session back to the shared store.
+
+        ``session_id`` is the ``JSESSIONID`` the session had before the update
+        (default: the one it has now). The store is only written if it still
+        holds that session, so an update never overwrites a newer login made by
+        another process and never brings back a session that was logged out.
+        Returns whether the store was written.
+        """
+        expected = session_id or session.cookie_value(SESSION_COOKIE)
         async with self.store.locked(self._lock_timeout):
-            self.store.save(self._session)
+            stored = self.store.load()
+            if stored is None or stored.cookie_value(SESSION_COOKIE) != expected:
+                return False
+            self.store.save(session)
+            return True
+
+    async def absorb(self, session: StoredSession, response: httpx.Response) -> None:
+        """Take over ``Set-Cookie`` values of a response and save them if they changed.
+
+        Jama may replace ``jama-csrf-token`` or ``JSESSIONID`` in the middle of
+        a session. A response that accepted the request is trusted with every
+        cookie; a CSRF rejection only with the token cookie; a dead-session
+        response with nothing, because the anonymous cookies it may carry must
+        not replace the stored session.
+        """
+        if is_session_rejected(response):
+            return
+        session_id = session.cookie_value(SESSION_COOKIE)
+        if merge_response_cookies(session, response, csrf_only=is_csrf_rejected(response)):
+            await self.persist(session, session_id)
+            logger.debug("Jama replaced a session cookie, session updated")
+
+    async def adopt_cookie_csrf(self, session: StoredSession, sent_token: str) -> bool:
+        """Use the token from the ``jama-csrf-token`` cookie as the header value.
+
+        ``sent_token`` is the header value that was just rejected. Returns True
+        if the cookie holds a different token, which is then saved.
+        """
+        if not session.adopt_cookie_csrf(sent_token):
+            return False
+        await self.persist(session)
+        logger.debug("Took the Jama CSRF token from the session cookie")
+        return True
 
     def adopt_newer(self, dead: StoredSession | None) -> StoredSession | None:
         """Re-read the store; adopt and return its session if it differs from ``dead``."""
@@ -339,21 +426,21 @@ class SessionManager:
         return stored
 
     async def refresh_csrf(self, session: StoredSession) -> bool:
-        """Fetch a fresh CSRF token with one authenticated GET.
+        """Fetch the current CSRF token with one authenticated GET.
 
-        Returns False if the GET itself was rejected (the session is dead).
-        The token comes from the response's ``Set-Cookie``; if the server did
-        not send one, the token already in the cookie jar is used.
+        The GET sends the token from the cookie as the header (never a header
+        value that is known to be wrong) and takes over any ``Set-Cookie`` of
+        the answer. Returns False if the GET itself was not accepted.
         """
+        session_id = session.cookie_value(SESSION_COOKIE)
+        changed = session.adopt_cookie_csrf(None)
         result = await probe(self.settings.base_url, session, self._transport)
         if not result.ok:
             return False
-        cookie_token = session.cookie_value(CSRF_COOKIE)
-        if cookie_token:
-            session.set_csrf(cookie_token)
         session.last_validated_at = time.time()
-        await self.persist()
-        logger.debug("Refreshed the Jama CSRF token")
+        await self.persist(session, session_id)
+        if changed or result.changed:
+            logger.debug("Refreshed the Jama CSRF token")
         return True
 
     async def recover(
@@ -372,6 +459,8 @@ class SessionManager:
             if stored is not None and not stored.same_as(dead):
                 result = await probe(self.settings.base_url, stored, self._transport)
                 if result.ok:
+                    if result.changed:
+                        self.store.save(stored)
                     self._session, self._loaded = stored, True
                     logger.debug("Using the Jama session another process logged in with")
                     return stored
@@ -456,4 +545,8 @@ class SessionManager:
         session = self.current()
         if session is None:
             return False
-        return (await probe(self.settings.base_url, session, self._transport)).ok
+        session_id = session.cookie_value(SESSION_COOKIE)
+        result = await probe(self.settings.base_url, session, self._transport)
+        if result.ok and result.changed:
+            await self.persist(session, session_id)
+        return result.ok

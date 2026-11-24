@@ -106,6 +106,20 @@ class StoredSession:
         self.csrf_token = token
         return self.set_cookie(CSRF_COOKIE, token) or changed
 
+    def adopt_cookie_csrf(self, sent_token: str | None) -> bool:
+        """Make the header token follow the ``jama-csrf-token`` cookie.
+
+        Returns True if the cookie holds a token that differs from
+        ``sent_token`` (default: the current header token), i.e. if sending the
+        request again can have a different outcome.
+        """
+        cookie_token = self.cookie_value(CSRF_COOKIE)
+        reference = self.csrf_token if sent_token is None else sent_token
+        if not cookie_token or cookie_token == reference:
+            return False
+        self.csrf_token = cookie_token
+        return True
+
     def same_as(self, other: StoredSession | None) -> bool:
         """True if both objects describe the same server-side session state."""
         if other is None:

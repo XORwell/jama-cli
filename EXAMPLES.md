@@ -79,7 +79,7 @@ jama items list 1172 --fields id,documentKey,name,status,priority
 jama items get 1241247
 
 # JSON output for scripting
-jama items get 1241247 --output json
+jama -o json items get 1241247
 
 # Find API ID: look at 'id' column in items list, or URL after /items/
 ```
@@ -334,26 +334,26 @@ jama migrate copy 123 456 --from staging --to production
 
 ```bash
 # Requirements list
-jama items list 1172 --type 45 --output csv > requirements.csv
+jama -o csv items list 1172 --type 45 > requirements.csv
 
 # Traceability matrix
 jama trace matrix 1172 --format csv > traceability.csv
 
 # All items with custom fields
-jama items list 1172 --limit 0 --fields id,documentKey,name,status,priority --output csv > all_items.csv
+jama -o csv items list 1172 --limit 0 --fields id,documentKey,name,status,priority > all_items.csv
 ```
 
 ### JSON processing with jq
 
 ```bash
 # Get item names
-jama items list 1172 --output json | jq '.[].fields.name'
+jama -o json items list 1172 | jq '.[].fields.name'
 
 # Count by status
-jama items list 1172 --limit 0 --output json | jq 'group_by(.fields.status) | map({status: .[0].fields.status, count: length})'
+jama -o json items list 1172 --limit 0 | jq 'group_by(.fields.status) | map({status: .[0].fields.status, count: length})'
 
 # Extract specific item field
-jama items get 1241247 --output json | jq '.fields.description'
+jama -o json items get 1241247 | jq '.fields.description'
 ```
 
 ### Batch operations
@@ -486,13 +486,13 @@ jama types list
 jama items list 1172
 
 # JSON - for scripting/jq
-jama items list 1172 --output json
+jama -o json items list 1172
 
 # CSV - for spreadsheets
-jama items list 1172 --output csv > items.csv
+jama -o csv items list 1172 > items.csv
 
 # YAML - for config files
-jama items list 1172 --output yaml
+jama -o yaml items list 1172
 ```
 
 ### Debugging

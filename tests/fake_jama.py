@@ -6,8 +6,10 @@ Reproduces the behaviour that makes web-session auth tricky:
 - ``j_acegi_security_check`` redirects to ``...login_error...`` on bad credentials;
 - a dead session shows up as a 401 with an empty message or as a 302 to the login page;
 - a missing permission is also a 401, but with a "permission" message;
-- writes compare the ``jama-csrf-token`` header with the session's token; a fresh
-  token is only delivered through the ``Set-Cookie`` of an authenticated GET;
+- every REST call, reads included, compares the ``jama-csrf-token`` header with
+  the session's token; a wrong or missing header is a 401 "CSRF Exception" on a
+  session that stays alive;
+- a successful DELETE answers 204 with an empty body;
 - ``logout.req`` only ends the session when the CSRF header is present;
 - one live session per account: a new login invalidates the previous one.
 
@@ -29,6 +31,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 
 PERMISSION_MESSAGE = "You don't have permission to delete this item"
+CSRF_MESSAGE = "CSRF Exception"
 
 
 class FakeJama:
@@ -39,12 +42,18 @@ class FakeJama:
         login_delay: float = 0.0,
         sso: bool = False,
         idp_interactive: bool = False,
+        csrf_cookie_on_reject: bool = True,
     ) -> None:
         self.ctx = context_path.rstrip("/")
         self.dead_as = dead_as  # "401" or "302"
         self.login_delay = login_delay
         self.sso = sso
         self.idp_interactive = idp_interactive
+        # Whether a CSRF rejection tells the client the current token through
+        # Set-Cookie. Real Jama's behaviour here is not known; both are covered.
+        self.csrf_cookie_on_reject = csrf_cookie_on_reject
+        # Extra Set-Cookie pairs added to the next successful REST answer.
+        self.rotate_on_next: list[tuple[str, str]] = []
         self.users = {"alice": "s3cret-pw-alice"}
         self.sso_user = "alice"
         # JSESSIONID -> {"user": str | None, "csrf": str}
@@ -53,6 +62,7 @@ class FakeJama:
         self.reject_everything = False
         self.requests: list[tuple[str, str]] = []
         self._lock = threading.Lock()
+        self._retiring: str | None = None
 
     # ----- test controls -------------------------------------------------
 
@@ -69,6 +79,16 @@ class FakeJama:
         with self._lock:
             for session in self.sessions.values():
                 session["csrf"] = "csrf-" + secrets.token_hex(8)
+
+    def rotate_session_id(self) -> str:
+        """Give the one authenticated session a new id, announced on its next answer."""
+        with self._lock:
+            old = next(sid for sid, data in self.sessions.items() if data["user"])
+            new = "auth-" + secrets.token_hex(12)
+            self.sessions[new] = self.sessions[old]
+            self.rotate_on_next.append(("JSESSIONID", new))
+            self._retiring = old
+        return new
 
     def live_secrets(self) -> list[str]:
         """Every secret value the server currently knows (for leak checks)."""
@@ -223,12 +243,22 @@ class FakeJama:
             return self._dead()
 
         headers: list[tuple[str, str]] = []
-        if request.method == "GET":
-            # An authenticated GET is the only way to learn the current token.
-            if cookies.get("jama-csrf-token") != session["csrf"]:
-                headers.append(self._cookie("jama-csrf-token", session["csrf"]))
-        elif request.headers.get("jama-csrf-token") != session["csrf"]:
-            return httpx.Response(401, json={"meta": {"status": "Unauthorized", "message": ""}})
+        if cookies.get("jama-csrf-token") != session["csrf"]:
+            headers.append(self._cookie("jama-csrf-token", session["csrf"]))
+        # The header is checked on every call, reads included.
+        if request.headers.get("jama-csrf-token") != session["csrf"]:
+            return httpx.Response(
+                401,
+                headers=headers if self.csrf_cookie_on_reject else [],
+                json={"meta": {"status": "Unauthorized", "message": CSRF_MESSAGE}},
+            )
+        with self._lock:
+            for name, value in self.rotate_on_next:
+                headers.append(self._cookie(name, value))
+            self.rotate_on_next.clear()
+            if self._retiring:
+                self.sessions.pop(self._retiring, None)
+                self._retiring = None
 
         def ok(data: Any, status: int = 200, **meta: Any) -> httpx.Response:
             body = {"meta": {"status": "OK", **meta}, "data": data}
@@ -245,6 +275,11 @@ class FakeJama:
             return ok({"id": 1, "fields": {"name": "Item"}})
         if request.method == "POST" and resource == "items":
             return ok(None, status=201, id=101)
+        if request.method == "PUT" and resource == "items/1":
+            return ok(None)
+        if request.method == "DELETE" and resource == "items/1":
+            # Real Jama answers a successful delete without a body.
+            return httpx.Response(204, headers=headers)
         if request.method == "DELETE" and resource == "items/999":
             return httpx.Response(
                 401, json={"meta": {"status": "Unauthorized", "message": PERMISSION_MESSAGE}}
@@ -280,6 +315,7 @@ class FakeJama:
 
             do_GET = _handle  # noqa: N815
             do_POST = _handle  # noqa: N815
+            do_PUT = _handle  # noqa: N815
             do_DELETE = _handle  # noqa: N815
 
             def log_message(self, *args: Any) -> None:

@@ -23,13 +23,15 @@ from jama_cli.core.session import (
     SessionManager,
     SessionSettings,
     form_login,
+    is_auth_rejected,
+    is_csrf_rejected,
     is_session_rejected,
     probe,
 )
 from jama_cli.core.session_store import SessionStore, StoredSession, default_session_file
 from jama_cli.core.sync_wrapper import SyncJamaApi
 from jama_cli.models import JamaProfile
-from tests.fake_jama import PERMISSION_MESSAGE, FakeJama
+from tests.fake_jama import CSRF_MESSAGE, PERMISSION_MESSAGE, FakeJama
 
 BASE = "https://jama.example.com/contour"
 
@@ -63,6 +65,21 @@ def log_lines() -> Any:
     sink_id = logger.add(lines.append, level="DEBUG", format="{message}")
     yield lines
     logger.remove(sink_id)
+
+
+async def logged_in_store(fake: FakeJama, settings: SessionSettings) -> SessionStore:
+    """Log in once, save the session, and make any further login impossible."""
+    store = SessionStore(settings.store_path)
+    store.save(await form_login(settings, fake.transport()))
+    settings.password = None
+    return store
+
+
+def tamper(store: SessionStore, **changes: Any) -> None:
+    """Edit top-level fields of the session file, as a user with an editor would."""
+    data = json.loads(store.path.read_text())
+    data.update(changes)
+    store.path.write_text(json.dumps(data))
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +203,20 @@ class TestLoginAndProbe:
         assert not is_session_rejected(resp(401, json={"meta": {"message": PERMISSION_MESSAGE}}))
         assert not is_session_rejected(resp(302, headers={"Location": "/contour/other"}))
         assert not is_session_rejected(resp(404, json={"meta": {"message": "x"}}))
+
+    def test_csrf_rejection_is_not_a_dead_session(self) -> None:
+        def resp(message: str, code: int = 401) -> httpx.Response:
+            return httpx.Response(code, json={"meta": {"message": message}})
+
+        for message in (CSRF_MESSAGE, "csrf exception", "Invalid CSRF token"):
+            assert is_csrf_rejected(resp(message))
+            assert not is_session_rejected(resp(message))
+            assert is_auth_rejected(resp(message))
+        assert not is_csrf_rejected(resp(""))
+        assert not is_csrf_rejected(resp(PERMISSION_MESSAGE))
+        assert not is_auth_rejected(resp(PERMISSION_MESSAGE))
+        assert not is_csrf_rejected(resp(CSRF_MESSAGE, code=403))
+        assert is_auth_rejected(resp(""))
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +400,249 @@ class TestSessionClient:
 # ---------------------------------------------------------------------------
 # logout / status
 # ---------------------------------------------------------------------------
+
+
+class TestCsrfRepair:
+    """Jama checks the CSRF header on every call; a wrong one is not a dead session."""
+
+    @pytest.mark.parametrize("bad_token", ["wrong-token", ""])
+    async def test_read_with_bad_header_is_repaired_without_login(
+        self, fake: FakeJama, settings: SessionSettings, bad_token: str
+    ) -> None:
+        store = await logged_in_store(fake, settings)
+        tamper(store, csrf_token=bad_token)
+
+        async with make_client(fake, settings) as client:
+            item = await client.get("items/1")
+
+        assert item["data"]["id"] == 1
+        assert fake.login_count == 1
+        # The file is correct again, so the next process does not hit the problem.
+        repaired = store.load()
+        assert repaired is not None
+        assert repaired.csrf_token == repaired.cookie_value("jama-csrf-token")
+        assert repaired.csrf_token in fake.live_secrets()
+
+    async def test_write_with_bad_header_is_repaired_without_login(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        store = await logged_in_store(fake, settings)
+        tamper(store, csrf_token="wrong-token")
+
+        async with make_client(fake, settings) as client:
+            created = await client.post("items", json={"fields": {"name": "x"}})
+            await client.put("items/1", json={"fields": {"name": "y"}})
+
+        assert created["meta"]["id"] == 101
+        assert fake.login_count == 1
+        assert fake.requests.count(("POST", "/contour/rest/v1/items")) == 2
+
+    async def test_repair_takes_one_retry_and_no_probe(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        store = await logged_in_store(fake, settings)
+        tamper(store, csrf_token="wrong-token")
+
+        async with make_client(fake, settings) as client:
+            before = len(fake.requests)
+            await client.get("items/1")
+
+        assert fake.requests[before:] == [("GET", "/contour/rest/v1/items/1")] * 2
+
+    @pytest.mark.parametrize("method", ["GET", "POST"])
+    async def test_token_replaced_by_server_is_repaired_without_login(
+        self, fake: FakeJama, settings: SessionSettings, method: str
+    ) -> None:
+        store = await logged_in_store(fake, settings)
+        async with make_client(fake, settings) as client:
+            await client.get("users/current")
+            # Header and cookie are both stale now.
+            fake.rotate_csrf()
+            if method == "GET":
+                await client.get("items/1")
+            else:
+                await client.post("items", json={"fields": {"name": "x"}})
+
+        assert fake.login_count == 1
+        stored = store.load()
+        assert stored is not None
+        assert stored.csrf_token in fake.live_secrets()
+
+    async def test_unrepairable_token_ends_with_login_hint_not_a_loop(
+        self, settings: SessionSettings
+    ) -> None:
+        # This server never tells the client the new token.
+        fake = FakeJama(csrf_cookie_on_reject=False)
+        await logged_in_store(fake, settings)
+        logins: list[str] = []
+
+        async def no_login(_settings: SessionSettings, mode: str) -> StoredSession:
+            logins.append(mode)
+            raise UnauthorizedException("No valid Jama session. Run `jama login` to sign in.")
+
+        async with make_client(fake, settings) as client:
+            await client.get("users/current")
+            fake.rotate_csrf()
+            assert client.session is not None
+            client.session._login_func = no_login
+            before = len(fake.requests)
+            with pytest.raises(UnauthorizedException) as exc:
+                await client.get("items/1")
+
+        assert "jama login" in str(exc.value)
+        assert logins == ["auto"]
+        # The request, one probe (users/current, then the projects fallback is
+        # skipped because the answer was a rejection), nothing else.
+        assert fake.requests[before:] == [
+            ("GET", "/contour/rest/v1/items/1"),
+            ("GET", "/contour/rest/v1/users/current"),
+        ]
+
+    async def test_dead_session_still_needs_a_login(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        settings.login_interactive = "never"
+        settings.login_mode = "browser"
+        store = SessionStore(settings.store_path)
+        login_settings = SessionSettings(
+            base_url=BASE, username="alice", password="s3cret-pw-alice", login_mode="form"
+        )
+        store.save(await form_login(login_settings, fake.transport()))
+        fake.kill_sessions()
+
+        async with make_client(fake, settings) as client:
+            with pytest.raises(UnauthorizedException) as exc:
+                await client.get("items/1")
+        assert "Run `jama login`" in str(exc.value)
+
+    async def test_permission_401_with_bad_header_free_session_never_logs_in(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        await logged_in_store(fake, settings)
+        async with make_client(fake, settings) as client:
+            before = len(fake.requests)
+            with pytest.raises(UnauthorizedException) as exc:
+                await client.delete("items/999")
+        assert "permission" in str(exc.value)
+        assert fake.login_count == 1
+        assert fake.requests[before:] == [("DELETE", "/contour/rest/v1/items/999")]
+
+    async def test_probe_repairs_bad_header(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        store = await logged_in_store(fake, settings)
+        tamper(store, csrf_token="wrong-token")
+        manager = SessionManager(settings, transport=fake.transport())
+
+        status = await manager.status()
+
+        assert status["valid"] is True
+        stored = store.load()
+        assert stored is not None
+        assert stored.csrf_token in fake.live_secrets()
+
+    async def test_no_secrets_in_logs_or_errors_during_repair(
+        self, settings: SessionSettings, log_lines: list[str]
+    ) -> None:
+        fake = FakeJama(csrf_cookie_on_reject=False)
+        store = await logged_in_store(fake, settings)
+        secrets_before = fake.live_secrets()
+        tamper(store, csrf_token="wrong-token-value")
+
+        errors: list[str] = []
+        async with make_client(fake, settings) as client:
+            await client.get("items/1")  # repaired from the cookie
+            fake.rotate_csrf()  # not repairable on this server
+            try:
+                await client.post("items", json={"fields": {"name": "x"}})
+            except (UnauthorizedException, CoreException) as e:
+                errors.append(f"{e} {e!r}")
+
+        assert errors, "the unrepairable write should have failed"
+        text = "\n".join(log_lines + errors)
+        for secret in secrets_before + fake.live_secrets() + ["wrong-token-value"]:
+            assert secret not in text
+
+
+class TestResponseCookies:
+    """Set-Cookie of ordinary answers is taken over, not only that of the probe."""
+
+    async def test_replaced_session_id_is_adopted_and_saved(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        store = await logged_in_store(fake, settings)
+        async with make_client(fake, settings) as client:
+            await client.get("items/1")
+            new_id = fake.rotate_session_id()
+            await client.get("items/1")  # answer carries the new JSESSIONID
+            await client.get("items/1")  # old id is gone on the server now
+
+        assert fake.login_count == 1
+        stored = store.load()
+        assert stored is not None
+        assert stored.cookie_value("JSESSIONID") == new_id
+        if sys.platform != "win32":
+            assert stat.S_IMODE(os.stat(store.path).st_mode) == 0o600
+
+    async def test_cookies_of_a_dead_session_answer_are_ignored(
+        self, settings: SessionSettings
+    ) -> None:
+        fake = FakeJama()
+        store = await logged_in_store(fake, settings)
+        manager = SessionManager(settings, transport=fake.transport())
+        session = manager.current()
+        assert session is not None
+        good_id = session.cookie_value("JSESSIONID")
+
+        dead = httpx.Response(
+            401,
+            headers={"set-cookie": "JSESSIONID=anonymous-id; Path=/contour"},
+            json={"meta": {"message": ""}},
+            request=httpx.Request("GET", BASE + "/rest/v1/items/1"),
+        )
+        await manager.absorb(session, dead)
+
+        assert session.cookie_value("JSESSIONID") == good_id
+        stored = store.load()
+        assert stored is not None and stored.cookie_value("JSESSIONID") == good_id
+
+    async def test_update_does_not_overwrite_a_newer_login_or_undo_a_logout(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        store = SessionStore(settings.store_path)
+        ours = await form_login(settings, fake.transport())
+        store.save(ours)
+        manager = SessionManager(settings, transport=fake.transport())
+
+        newer = await form_login(settings, fake.transport())
+        store.save(newer)
+        ours.set_csrf("some-other-token")
+        assert await manager.persist(ours) is False
+        stored = store.load()
+        assert stored is not None and stored.same_as(newer)
+
+        store.delete()
+        assert await manager.persist(ours) is False
+        assert store.load() is None
+
+
+class TestEmptyBodies:
+    async def test_delete_with_empty_answer_returns_empty_dict(
+        self, fake: FakeJama, settings: SessionSettings
+    ) -> None:
+        async with make_client(fake, settings) as client:
+            assert await client.delete("items/1") == {}
+
+    @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
+    async def test_write_helpers_accept_204_with_any_auth(self, method: str) -> None:
+        transport = httpx.MockTransport(lambda request: httpx.Response(204))
+        async with JamaHttpClient(BASE, ("user", "pw"), transport=transport) as client:
+            assert await getattr(client, method)("items/1") == {}
+
+    async def test_api_delete_item_reports_success(self) -> None:
+        transport = httpx.MockTransport(lambda request: httpx.Response(204))
+        async with JamaHttpClient(BASE, ("user", "pw"), transport=transport) as client:
+            assert await JamaApi(client).delete_item(1) in (200, 204)
 
 
 class TestLogoutAndStatus:
