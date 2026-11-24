@@ -6,9 +6,13 @@ Replaces all ~60 methods from py_jama_rest_client.client.JamaClient.
 
 from __future__ import annotations
 
+import json
 from typing import Any, cast
 
 from jama_cli.core.http_client import JamaHttpClient
+
+# The web UI's own upload endpoint, relative to the base URL (not under /rest/v1).
+INTERNAL_ATTACHMENTS_PATH = "ui/internal/attachments"
 
 
 def _data(resp: dict[str, Any]) -> dict[str, Any]:
@@ -21,9 +25,18 @@ def _id(resp: dict[str, Any]) -> int:
     return int(resp["meta"]["id"])
 
 
+_STATUS_NAMES = {"OK": 200, "CREATED": 201, "ACCEPTED": 202, "NO CONTENT": 204, "NO_CONTENT": 204}
+
+
 def _status(resp: dict[str, Any]) -> int:
     """Extract the status code from a Jama API response."""
-    return int(resp.get("meta", {}).get("status", 200))
+    status = resp.get("meta", {}).get("status", 200)
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        # Jama reports the status as text ("OK", "Created"). Errors were raised
+        # from the HTTP status before this point, so this is a success.
+        return _STATUS_NAMES.get(str(status).strip().upper(), 200)
 
 
 class JamaApi:
@@ -31,6 +44,16 @@ class JamaApi:
 
     def __init__(self, http: JamaHttpClient) -> None:
         self._http = http
+
+    @property
+    def base_url(self) -> str:
+        """The configured Jama base URL (may include a context path)."""
+        return self._http.base_url
+
+    @property
+    def uses_session_auth(self) -> bool:
+        """True when requests are authenticated with a Jama web session."""
+        return self._http.session is not None
 
     # =========================================================================
     # Projects
@@ -288,6 +311,11 @@ class JamaApi:
         """Get test runs for a test cycle."""
         return await self._http.get_all(f"testcycles/{test_cycle_id}/testruns")
 
+    async def get_test_run(self, test_run_id: int) -> dict[str, Any]:
+        """Get a specific test run, including its steps."""
+        data = await self._http.get(f"testruns/{test_run_id}")
+        return _data(data)
+
     async def create_test_plan(
         self,
         project_id: int,
@@ -382,6 +410,73 @@ class JamaApi:
             f"items/{item_id}/attachments", json={"attachment": attachment_id}
         )
         return _status(resp)
+
+    async def get_item_attachments(self, item_id: int) -> list[dict[str, Any]]:
+        """Get the attachments linked to an item."""
+        return await self._http.get_all(f"items/{item_id}/attachments")
+
+    async def post_project_attachment(
+        self, project_id: int, name: str, description: str = ""
+    ) -> int:
+        """Create an (empty) attachment in a project. Returns the attachment ID."""
+        resp = await self._http.post(
+            f"projects/{project_id}/attachments",
+            json={"fields": {"name": name, "description": description}},
+        )
+        return _id(resp)
+
+    async def put_attachment_file(
+        self, attachment_id: int, file_name: str, content: bytes, content_type: str
+    ) -> int:
+        """Upload the file of an attachment (multipart part ``file``). Returns the HTTP status."""
+        response = await self._http.request(
+            "PUT",
+            f"attachments/{attachment_id}/file",
+            files={"file": (file_name, content, content_type)},
+        )
+        return response.status_code
+
+    async def get_attachment_file(self, attachment_id: int) -> bytes:
+        """Download the file of an attachment."""
+        response = await self._http.request(
+            "GET", f"attachments/{attachment_id}/file", headers={"Accept": "*/*"}
+        )
+        return response.content
+
+    async def get_file_by_url(self, url: str) -> bytes:
+        """Download a file by its Jama URL (for example an inline image's embed URL)."""
+        response = await self._http.request(
+            "GET", "files", params={"url": url}, headers={"Accept": "*/*"}
+        )
+        return response.content
+
+    async def post_internal_attachment(
+        self,
+        item_id: int,
+        project_id: int,
+        name: str,
+        description: str,
+        file_name: str,
+        content: bytes,
+        content_type: str,
+    ) -> int:
+        """Create an attachment AND link it to an item through the web UI's own endpoint.
+
+        ``POST <base>/ui/internal/attachments`` is undocumented and needs a web
+        session (cookie + CSRF header), so it is only usable with session auth.
+        Returns the attachment ID.
+        """
+        document = {"project": project_id, "fields": {"name": name, "description": description}}
+        resp = await self._http.post(
+            f"{self._http.base_url}/{INTERNAL_ATTACHMENTS_PATH}",
+            files={"file": (file_name, content, content_type)},
+            data={
+                "itemId": str(item_id),
+                "attachmentDocument": json.dumps(document),
+                "originalFileName": file_name,
+            },
+        )
+        return _id(resp)
 
     # =========================================================================
     # Workflow

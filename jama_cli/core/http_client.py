@@ -306,6 +306,23 @@ class JamaHttpClient:
         response = await self._request("DELETE", path)
         return response.json()
 
+    # --- Raw access (file transfers, non-REST endpoints) ---
+
+    @property
+    def base_url(self) -> str:
+        """The configured Jama base URL, including any context path, without ``/rest/v1``."""
+        return self._base_url
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a request and return the raw response (for bytes and multipart bodies).
+
+        Same auth, session recovery and status mapping as the JSON helpers.
+        ``path`` may be an absolute URL below the base URL. Bodies must be
+        re-sendable (``bytes``, never an open file), because a request can be
+        sent again after a session repair.
+        """
+        return await self._request(method, path, **kwargs)
+
     # --- Pagination ---
 
     async def get_all(

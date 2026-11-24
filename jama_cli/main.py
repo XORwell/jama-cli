@@ -24,6 +24,7 @@ from jama_cli.commands import (
     search,
     serve,
     tags,
+    testruns,
     tests,
     trace,
     types,
@@ -54,6 +55,7 @@ app.add_typer(attachments.app, name="attachments")
 app.add_typer(picklists.app, name="picklists")
 app.add_typer(tags.app, name="tags")
 app.add_typer(tests.app, name="tests")
+app.add_typer(testruns.app, name="testruns")
 app.add_typer(users.app, name="users")
 app.add_typer(trace.app, name="trace")
 app.add_typer(baseline.app, name="baseline")
