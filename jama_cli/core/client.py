@@ -257,6 +257,13 @@ class JamaClient:
                 credentials=(self.profile.username, self.profile.password),
                 oauth=False,
             )
+        elif self.profile.auth_type == "session":
+            from jama_cli.core.session import SessionManager
+
+            self._api = SyncJamaApi.from_session(
+                base_url=self.profile.url,
+                session=SessionManager(self.profile.session_settings()),
+            )
         else:
             raise ValueError(f"Unknown auth type: {self.profile.auth_type}")
 
