@@ -125,13 +125,26 @@ falls back to a login. Only an explicit `jama login` without `--from-browser` re
 browser-sourced session by one of the tool's own. Signing out in the browser ends the
 shared session for the CLI too, by design.
 
-Runtime target is "CLI/MCP under WSL, browser on the Windows host"; cookie stores are read from
-`/mnt/c/Users/<windows-user>/...`, with the Windows user resolved via `cmd.exe`, not guessed. The
-live, locked cookie database is never opened in place: it is copied with its `-wal`/`-shm`
-sidecars to a temp file, opened read-only, and deleted afterwards. Only the two cookies, only for
-the configured host, are read; values are never logged or raised.
+Firefox is looked for in the platform's profile directories (Windows `%APPDATA%`, macOS
+`~/Library/Application Support`, Linux classic, XDG, Snap and Flatpak). In WSL the Windows host's
+profile (`/mnt/c/Users/<windows-user>/...`, the Windows user resolved via `cmd.exe`, not guessed)
+and a Firefox inside WSL are both candidates; the most recently used profile wins.
 
-Firefox stores values in clear text (`moz_cookies`), so this is a file read inside WSL.
+Verified against a real Jama Cloud instance and Firefox on Windows (2026-11-24): `JSESSIONID`
+and `jama-csrf-token` are session cookies, and Firefox never writes session cookies to
+`cookies.sqlite` (it held only a persistent analytics cookie for the Jama host). They are in the
+session store, `sessionstore-backups/recovery.jsonlz4` (mozLz4: magic `mozLz40\0`, 4-byte
+little-endian size, one LZ4 block; decoded in pure Python, no dependency). Firefox rewrites it
+about every 15 seconds while something changes, and otherwise not at all, so a value read there
+can be minutes old; the authenticated probe decides. `cookies.sqlite` is read first and the
+session store fills what is missing; only cookies of the default context are used (no private
+windows, containers or partitioned storage). The locked live database is never opened in place:
+it is copied with its `-wal`/`-shm` sidecars to a temp file, opened read-only, and deleted
+afterwards. Only the two cookies, only for the configured host, are read; values are never
+logged or raised.
+
+`jama login --from-browser firefox` reuses a stored session only if it was read from Firefox
+too; a stored login or form session is replaced by reading the browser.
 
 Chrome and Edge are not supported, on purpose. Since v127 they bind the cookie key to the Windows
 user (App-Bound Encryption, `v20` values). An earlier version of this tool shipped a PowerShell

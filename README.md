@@ -188,11 +188,22 @@ environment, also in the `env` block of the MCP server. Reading the browser is
 non-interactive, so it works with `login_interactive: never`. Sign in to Jama in Firefox first; if
 you sign out there, the shared session ends for the CLI too (that coupling is the point).
 
-**Runtime target: CLI in WSL, browser on Windows.** The Firefox cookie store is read from
-`/mnt/c/Users/<windows-user>/...` (the Windows user name is asked of Windows, not guessed). Only
-the two Jama cookies, and only for your configured host, are ever read; the copied database file
-is deleted right after reading. Firefox keeps cookie values in clear text, so this is a plain
-file read inside WSL with no Windows component.
+**Where Firefox is looked for.** Windows: `%APPDATA%\Mozilla\Firefox`. macOS:
+`~/Library/Application Support/Firefox`. Linux: `~/.mozilla/firefox`, `~/.config/mozilla/firefox`,
+Snap (`~/snap/firefox/common/.mozilla/firefox`) and Flatpak
+(`~/.var/app/org.mozilla.firefox/.mozilla/firefox`). In WSL the Windows host's Firefox
+(`/mnt/c/Users/<windows-user>/...`, the Windows user is asked of Windows, not guessed) and a
+Firefox inside WSL are both considered; with several installs the most recently used profile wins.
+`--browser-cookies-path` overrides all of this.
+
+**Where the cookies are.** Jama's `JSESSIONID` and `jama-csrf-token` are session cookies, and
+Firefox never writes session cookies to `cookies.sqlite`. While Firefox runs they are only in its
+session store, `sessionstore-backups/recovery.jsonlz4`, which Firefox rewrites about every 15
+seconds. So right after signing in to Jama, wait a few seconds before `jama login --from-browser
+firefox`. Private windows, containers and partitioned cookies are ignored. Only the two Jama
+cookies, and only for your configured host, are ever read; copies of locked files are deleted
+right after reading. Firefox keeps cookie values in clear text, so no decryption and no Windows
+component is involved.
 
 **Logout.** A session taken over from Firefox *is* your browser's session. `jama logout` therefore
 only removes the stored copy and tells you so ("Removed the stored session; your browser session

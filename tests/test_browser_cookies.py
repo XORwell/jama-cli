@@ -7,20 +7,24 @@ is needed. Chrome and Edge are not supported and must be refused.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from jama_cli.core import browser_cookies
 from jama_cli.core.browser_cookies import (
     BROWSERS,
     CHROMIUM_UNSUPPORTED,
     BrowserCookieError,
     host_matches,
+    lz4_block_decompress,
     normalise_source,
     read_browser_session,
     read_firefox,
+    read_mozlz4,
 )
 from jama_cli.core.session import SessionManager, SessionSettings, browser_cookie_login
 from jama_cli.core.session_store import SessionStore
@@ -35,22 +39,58 @@ HOST = "jama.example.com"
 # ---------------------------------------------------------------------------
 
 
-def make_firefox_db(path: Path, cookies: list[tuple[str, str, str]]) -> None:
-    """Write a minimal Firefox cookies.sqlite with (name, value, host) rows."""
+def make_firefox_db(path: Path, cookies: list[tuple[str, ...]]) -> None:
+    """Write a minimal Firefox cookies.sqlite.
+
+    Rows are (name, value, host) or (name, value, host, originAttributes).
+    """
     path.unlink(missing_ok=True)
     conn = sqlite3.connect(path)
     conn.execute(
         "CREATE TABLE moz_cookies "
-        "(id INTEGER PRIMARY KEY, name TEXT, value TEXT, host TEXT, path TEXT, "
-        "expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER)"
+        "(id INTEGER PRIMARY KEY, originAttributes TEXT NOT NULL DEFAULT '', name TEXT, "
+        "value TEXT, host TEXT, path TEXT, expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER)"
     )
     conn.executemany(
-        "INSERT INTO moz_cookies (name, value, host, path, expiry, isSecure, isHttpOnly) "
-        "VALUES (?, ?, ?, '/', 0, 1, 1)",
-        cookies,
+        "INSERT INTO moz_cookies "
+        "(name, value, host, originAttributes, path, expiry, isSecure, isHttpOnly) "
+        "VALUES (?, ?, ?, ?, '/', 0, 1, 1)",
+        [row if len(row) == 4 else (*row, "") for row in cookies],
     )
     conn.commit()
     conn.close()
+
+
+def lz4_literals_block(data: bytes) -> bytes:
+    """An LZ4 block that stores ``data`` as literals only (valid, uncompressed)."""
+    length = len(data)
+    if length < 15:
+        return bytes([length << 4]) + data
+    rest = length - 15
+    extra = b"\xff" * (rest // 255) + bytes([rest % 255])
+    return b"\xf0" + extra + data
+
+
+def write_session_store(profile_dir: Path, cookies: list[dict[str, Any]], name: str = "") -> Path:
+    """Write a Firefox session store (mozLz4) holding the given session cookies."""
+    path = profile_dir / (name or "sessionstore-backups/recovery.jsonlz4")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps({"version": ["sessionrestore", 1], "cookies": cookies}).encode()
+    path.write_bytes(
+        b"mozLz40\0" + len(payload).to_bytes(4, "little") + lz4_literals_block(payload)
+    )
+    return path
+
+
+def store_cookie(name: str, value: str, host: str = HOST, **attrs: Any) -> dict[str, Any]:
+    origin = {
+        "firstPartyDomain": "",
+        "partitionKey": "",
+        "privateBrowsingId": 0,
+        "userContextId": 0,
+    }
+    origin.update(attrs)
+    return {"host": host, "name": name, "value": value, "path": "/", "originAttributes": origin}
 
 
 # ---------------------------------------------------------------------------
@@ -574,3 +614,183 @@ class TestRecoveryFollowsTheStoredSource:
         session = await own.login(force=True)
 
         assert session.source == "form" and fake.login_count == 1
+
+    async def test_from_browser_login_does_not_reuse_an_own_login_session(
+        self, tmp_path: Path
+    ) -> None:
+        """`jama login --from-browser firefox` must read the browser, not keep a form session."""
+        fake = FakeJama()
+        own = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        own_session = await own.login()
+        browser = self._settings(tmp_path, "firefox")
+        # Another account, so the fake's one-session-per-user rule keeps both alive.
+        self._browser_has(browser, *fake.plant_session("bob"))
+        assert fake.is_authenticated(own_session.cookie_value("JSESSIONID") or "")
+
+        session = await SessionManager(browser, transport=fake.transport()).login()
+
+        assert session.source == "browser-firefox" and fake.login_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Firefox session store (where session cookies such as JSESSIONID live)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionStore:
+    def test_lz4_block_with_overlapping_match(self) -> None:
+        # literals "abc", then a match of 9 bytes at offset 3, then an empty last sequence
+        block = bytes([0x35]) + b"abc" + bytes([3, 0]) + bytes([0x00])
+        assert lz4_block_decompress(block) == b"abc" * 4
+
+    def test_lz4_rejects_an_offset_before_the_start(self) -> None:
+        with pytest.raises(ValueError):
+            lz4_block_decompress(bytes([0x10]) + b"a" + bytes([5, 0]))
+
+    def test_read_mozlz4_round_trip(self, tmp_path: Path) -> None:
+        path = write_session_store(tmp_path, [store_cookie("JSESSIONID", "sid")])
+        assert read_mozlz4(path)["cookies"][0]["name"] == "JSESSIONID"
+
+    def test_session_cookies_come_from_the_store(self, tmp_path: Path) -> None:
+        """Real Firefox: cookies.sqlite has only persistent cookies, never JSESSIONID."""
+        db = tmp_path / "cookies.sqlite"
+        make_firefox_db(db, [("_dd_s", "rum", HOST)])
+        write_session_store(
+            tmp_path,
+            [
+                store_cookie("JSESSIONID", "sid-live"),
+                store_cookie("jama-csrf-token", "csrf-live", host="." + HOST),
+            ],
+        )
+
+        session = read_firefox(BASE, db)
+
+        assert session.cookie_value("JSESSIONID") == "sid-live"
+        assert session.csrf_token == "csrf-live"
+
+    def test_private_container_and_partitioned_cookies_are_ignored(self, tmp_path: Path) -> None:
+        db = tmp_path / "cookies.sqlite"
+        make_firefox_db(db, [("JSESSIONID", "sid-container", HOST, "^userContextId=2")])
+        write_session_store(
+            tmp_path,
+            [
+                store_cookie("JSESSIONID", "sid-private", privateBrowsingId=1),
+                store_cookie("jama-csrf-token", "csrf-part", partitionKey="(https,example.org)"),
+                store_cookie("jama-csrf-token", "csrf-ok"),
+            ],
+        )
+
+        with pytest.raises(BrowserCookieError) as exc:
+            read_firefox(BASE, db)
+
+        assert "JSESSIONID" in str(exc.value)
+        for secret in ("sid-container", "sid-private", "csrf-part", "csrf-ok"):
+            assert secret not in str(exc.value)
+
+    def test_the_newest_store_file_wins(self, tmp_path: Path) -> None:
+        db = tmp_path / "cookies.sqlite"
+        make_firefox_db(db, [])
+        old = write_session_store(
+            tmp_path,
+            [store_cookie("JSESSIONID", "sid-old"), store_cookie("jama-csrf-token", "c-old")],
+            name="sessionstore.jsonlz4",
+        )
+        os.utime(old, (1_000, 1_000))
+        write_session_store(
+            tmp_path,
+            [store_cookie("JSESSIONID", "sid-new"), store_cookie("jama-csrf-token", "c-new")],
+        )
+
+        assert read_firefox(BASE, db).cookie_value("JSESSIONID") == "sid-new"
+
+    def test_corrupt_store_is_skipped(self, tmp_path: Path) -> None:
+        db = tmp_path / "cookies.sqlite"
+        make_firefox_db(db, [])
+        bad = tmp_path / "sessionstore-backups" / "recovery.jsonlz4"
+        bad.parent.mkdir(parents=True)
+        bad.write_bytes(b"mozLz40\0garbage")
+
+        with pytest.raises(BrowserCookieError, match="missing cookie"):
+            read_firefox(BASE, db)
+
+
+# ---------------------------------------------------------------------------
+# Where Firefox lives on each platform
+# ---------------------------------------------------------------------------
+
+
+def make_profile_root(root: Path, sid: str, csrf: str, mtime: float) -> Path:
+    profile = root / "Profiles" / "abc.default-release"
+    profile.mkdir(parents=True)
+    (root / "profiles.ini").write_text(
+        "[Install1]\nDefault=Profiles/abc.default-release\n\n"
+        "[Profile0]\nName=default-release\nIsRelative=1\nPath=Profiles/abc.default-release\n"
+    )
+    make_firefox_db(profile / "cookies.sqlite", [])
+    store = write_session_store(
+        profile, [store_cookie("JSESSIONID", sid), store_cookie("jama-csrf-token", csrf)]
+    )
+    for path in (store, profile / "cookies.sqlite"):
+        os.utime(path, (mtime, mtime))
+    return profile
+
+
+class TestProfileRoots:
+    @pytest.fixture
+    def home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr(browser_cookies.Path, "home", lambda: tmp_path)
+        monkeypatch.setattr(browser_cookies, "in_wsl", lambda: False)
+        return tmp_path
+
+    def test_windows_uses_appdata(self, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(browser_cookies.sys, "platform", "win32")
+        monkeypatch.setenv("APPDATA", str(home / "Roaming"))
+        assert browser_cookies.firefox_root_candidates() == [home / "Roaming" / "Mozilla/Firefox"]
+
+    def test_macos(self, home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(browser_cookies.sys, "platform", "darwin")
+        assert browser_cookies.firefox_root_candidates() == [
+            home / "Library/Application Support/Firefox"
+        ]
+
+    def test_linux_knows_xdg_snap_and_flatpak(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(browser_cookies.sys, "platform", "linux")
+        roots = browser_cookies.firefox_root_candidates()
+        assert home / ".mozilla/firefox" in roots
+        assert home / ".config/mozilla/firefox" in roots
+        assert home / "snap/firefox/common/.mozilla/firefox" in roots
+        assert home / ".var/app/org.mozilla.firefox/.mozilla/firefox" in roots
+
+    def test_wsl_puts_the_windows_firefox_first(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(browser_cookies.sys, "platform", "linux")
+        monkeypatch.setattr(browser_cookies, "in_wsl", lambda: True)
+        monkeypatch.setattr(browser_cookies, "windows_user_home", lambda: home / "win")
+        roots = browser_cookies.firefox_root_candidates()
+        assert roots[0] == home / "win" / "AppData/Roaming/Mozilla/Firefox"
+        assert home / ".mozilla/firefox" in roots
+
+    def test_the_most_recently_used_firefox_wins(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(browser_cookies.sys, "platform", "linux")
+        monkeypatch.setattr(browser_cookies, "in_wsl", lambda: True)
+        monkeypatch.setattr(browser_cookies, "windows_user_home", lambda: home / "win")
+        make_profile_root(home / "win/AppData/Roaming/Mozilla/Firefox", "sid-win", "c-win", 1_000)
+        make_profile_root(
+            home / "snap/firefox/common/.mozilla/firefox", "sid-snap", "c-snap", 2_000
+        )
+
+        session = read_browser_session(BASE, "firefox")
+
+        assert session.cookie_value("JSESSIONID") == "sid-snap"
+
+    def test_no_firefox_names_the_places_searched(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(browser_cookies.sys, "platform", "darwin")
+        with pytest.raises(BrowserCookieError, match="Library/Application Support/Firefox"):
+            read_browser_session(BASE, "firefox")

@@ -558,10 +558,22 @@ class SessionManager:
         return self.settings
 
     async def login(self, interactive: str = "auto", force: bool = False) -> StoredSession:
-        """Explicit login (``jama login``). Reuses a still-valid session unless forced."""
+        """Explicit login (``jama login``). Reuses a still-valid session unless forced.
+
+        With a ``session_source`` the stored session is only reused if it was
+        read from that same browser; any other session is replaced by reading
+        the browser, since that is what was asked for.
+        """
+        from jama_cli.core.browser_cookies import normalise_source
+
+        browser = normalise_source(self.settings.session_source)
+        wanted_source = SOURCE_BROWSER_PREFIX + browser if browser else None
         async with self._recover_lock, self.store.locked(self._lock_timeout):
             stored = self.store.load()
-            if stored is not None and not force:
+            reusable = stored is not None and (
+                wanted_source is None or stored.source == wanted_source
+            )
+            if stored is not None and reusable and not force:
                 result = await probe(self.settings.base_url, stored, self._transport)
                 if result.ok:
                     stored.username = result.username or stored.username
