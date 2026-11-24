@@ -74,6 +74,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- `jama login --from-browser firefox` never found a Jama session: `JSESSIONID` and
+  `jama-csrf-token` are session cookies, which Firefox does not write to `cookies.sqlite`. They
+  are now read from Firefox's session store (`sessionstore-backups/recovery.jsonlz4`, decoded
+  without a new dependency), ignoring private windows, containers and partitioned cookies
+- Firefox profiles are found on Windows (`%APPDATA%`), macOS, and Linux Snap / Flatpak / XDG
+  installs, and in WSL a Firefox inside WSL is considered next to the Windows one (the most
+  recently used profile wins). Before, only `~/.mozilla/firefox` and the Windows host were searched
+- `jama login --from-browser firefox` reused a still-valid stored login/form session instead of
+  reading the browser; it now only reuses a session that came from Firefox
 - A session taken over with `jama login --from-browser firefox` is now also *renewed* from
   Firefox in every process that shares it, even one without `session_source` configured
   (for example an MCP server). Before, such a process logged in on its own once the session

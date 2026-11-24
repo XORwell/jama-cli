@@ -14,9 +14,15 @@ exception message.
 Runtime target: CLI/MCP under Linux (WSL2), browser on the Windows host. The
 Windows file tree is reachable from WSL under ``/mnt/c/...``.
 
-Only **Firefox** is supported. It keeps cookie values in clear text
-(``cookies.sqlite`` → ``moz_cookies``), so everything happens by reading a file;
-no Windows component, no decryption.
+Only **Firefox** is supported. It keeps cookie values in clear text, so
+everything happens by reading files; no Windows component, no decryption.
+Jama's ``JSESSIONID`` and ``jama-csrf-token`` are *session* cookies (no expiry),
+and Firefox never writes session cookies to ``cookies.sqlite``. While Firefox
+runs they are only in its session store, ``sessionstore-backups/recovery.jsonlz4``
+(rewritten about every 15 seconds; ``sessionstore.jsonlz4`` after a shutdown with
+session restore). Both places are read: ``cookies.sqlite`` first, the session
+store for whatever is still missing. Only cookies of the default context are
+used, never those of private windows, containers or partitioned storage.
 
 Chrome and Edge are deliberately **not** supported. Since version 127 they bind
 the cookie key to the Windows user (App-Bound Encryption), and unwrapping it from
@@ -32,10 +38,12 @@ the copy is deleted afterwards.
 from __future__ import annotations
 
 import configparser
+import json
 import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -61,6 +69,15 @@ CHROMIUM_UNSUPPORTED = (
     "Reading Chrome/Edge cookies is not supported (App-Bound Encryption). "
     "Use --from-browser firefox, or `jama login`."
 )
+
+# Firefox session store files that may hold session cookies, relative to the
+# profile directory. The newest readable one wins.
+_SESSION_STORE_FILES = (
+    "sessionstore-backups/recovery.jsonlz4",
+    "sessionstore-backups/recovery.baklz4",
+    "sessionstore.jsonlz4",
+)
+_MOZLZ4_MAGIC = b"mozLz40\0"
 
 
 class BrowserCookieError(CoreException):
@@ -114,7 +131,8 @@ def _build_session(base_url: str, values: dict[str, str]) -> StoredSession:
         raise BrowserCookieError(
             "The browser has no current Jama session for this host "
             f"(missing cookie: {', '.join(missing)}). Open the Jama site in the browser and "
-            "sign in first, then try again."
+            "sign in first, then try again. Firefox saves session cookies about every "
+            "15 seconds, so right after signing in wait a moment."
         )
     host = _jama_host(base_url)
     session = StoredSession(base_url=base_url.rstrip("/"), created_at=time.time())
@@ -207,19 +225,44 @@ def _read_rows(db_path: Path, query: str) -> list[tuple[Any, ...]]:
 # ---------------------------------------------------------------------------
 
 
-def firefox_profiles_dir(override_home: Path | None = None) -> Path:
-    """Firefox profiles directory, on the Windows host when running under WSL."""
-    if override_home is not None:
-        return override_home
+def firefox_root_candidates() -> list[Path]:
+    """Directories that may hold a Firefox ``profiles.ini`` on this machine, in order.
+
+    Under WSL the Windows host's Firefox comes first, then a Firefox inside WSL.
+    On Linux the classic, XDG, Snap and Flatpak locations are all considered.
+    """
+    roots: list[Path] = []
     if in_wsl():
         home = windows_user_home()
-        if home is None:
-            raise BrowserCookieError(
-                "Could not locate the Windows user profile from WSL. Pass the cookies path "
-                "explicitly (browser_cookies_path / --browser-cookies-path)."
-            )
-        return home / "AppData/Roaming/Mozilla/Firefox"
-    return Path.home() / ".mozilla/firefox"
+        if home is not None:
+            roots.append(home / "AppData/Roaming/Mozilla/Firefox")
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        base = Path(appdata) if appdata else Path.home() / "AppData/Roaming"
+        roots.append(base / "Mozilla/Firefox")
+    elif sys.platform == "darwin":
+        roots.append(Path.home() / "Library/Application Support/Firefox")
+    else:
+        home = Path.home()
+        roots += [
+            home / ".mozilla/firefox",
+            home / ".config/mozilla/firefox",
+            home / "snap/firefox/common/.mozilla/firefox",
+            home / ".var/app/org.mozilla.firefox/.mozilla/firefox",
+        ]
+    return roots
+
+
+def firefox_profile_roots() -> list[Path]:
+    """The candidate directories that actually contain a ``profiles.ini``."""
+    return [root for root in firefox_root_candidates() if (root / "profiles.ini").is_file()]
+
+
+def _profile_freshness(profile_dir: Path) -> float:
+    """Newest modification time of the files the Jama cookies are read from."""
+    names = ("cookies.sqlite", "cookies.sqlite-wal", *_SESSION_STORE_FILES)
+    times = [p.stat().st_mtime for p in (profile_dir / n for n in names) if p.is_file()]
+    return max(times, default=0.0)
 
 
 def _find_firefox_cookie_db(profiles_root: Path, profile_name: str | None) -> Path:
@@ -272,19 +315,126 @@ def _find_firefox_cookie_db(profiles_root: Path, profile_name: str | None) -> Pa
     )
 
 
+def lz4_block_decompress(src: bytes) -> bytes:
+    """Decompress one raw LZ4 block (the payload of Firefox's ``mozLz4`` files)."""
+    out = bytearray()
+    i, n = 0, len(src)
+    while i < n:
+        token = src[i]
+        i += 1
+        length = token >> 4
+        if length == 15:
+            while True:
+                extra = src[i]
+                i += 1
+                length += extra
+                if extra != 255:
+                    break
+        out += src[i : i + length]
+        i += length
+        if i >= n:
+            break
+        offset = src[i] | (src[i + 1] << 8)
+        i += 2
+        if offset == 0 or offset > len(out):
+            raise ValueError("corrupt LZ4 block")
+        length = (token & 15) + 4
+        if (token & 15) == 15:
+            while True:
+                extra = src[i]
+                i += 1
+                length += extra
+                if extra != 255:
+                    break
+        start = len(out) - offset
+        if length <= offset:
+            out += out[start : start + length]
+        else:
+            # Overlapping match: the copied bytes repeat with period ``offset``.
+            chunk = bytes(out[start:])
+            out += (chunk * (length // offset + 1))[:length]
+    return bytes(out)
+
+
+def read_mozlz4(path: Path) -> Any:
+    """Parse a Firefox ``.jsonlz4`` / ``.baklz4`` file into JSON."""
+    raw = path.read_bytes()
+    if raw[:8] != _MOZLZ4_MAGIC or len(raw) < 12:
+        raise ValueError("not a mozLz4 file")
+    size = int.from_bytes(raw[8:12], "little")
+    data = lz4_block_decompress(raw[12:])
+    if len(data) != size:
+        raise ValueError("mozLz4 size mismatch")
+    return json.loads(data)
+
+
+def _is_default_context(attributes: Any) -> bool:
+    """True for cookies outside private windows, containers and partitioned storage."""
+    if isinstance(attributes, str):  # cookies.sqlite: "" or "^userContextId=1&..."
+        return attributes == ""
+    if isinstance(attributes, dict):  # session store: {} or {"userContextId": 1, ...}
+        return not any(
+            attributes.get(key) for key in ("userContextId", "privateBrowsingId", "partitionKey")
+        )
+    return attributes is None
+
+
+def _session_store_values(profile_dir: Path, host: str) -> dict[str, str]:
+    """Jama session cookies from the newest readable Firefox session store file."""
+    candidates = [profile_dir / rel for rel in _SESSION_STORE_FILES]
+    existing = sorted(
+        (path for path in candidates if path.is_file()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for path in existing:
+        try:
+            data = read_mozlz4(path)
+        except (OSError, ValueError) as e:
+            logger.debug(f"Skipping Firefox session store {path.name} ({type(e).__name__})")
+            continue
+        values: dict[str, str] = {}
+        for cookie in data.get("cookies", []) if isinstance(data, dict) else []:
+            if not isinstance(cookie, dict):
+                continue
+            name = cookie.get("name")
+            if (
+                name in _WANTED
+                and cookie.get("value")
+                and host_matches(str(cookie.get("host", "")), host)
+                and _is_default_context(cookie.get("originAttributes"))
+            ):
+                values[name] = str(cookie["value"])
+        logger.debug(f"Read the Firefox session store {path.name}")
+        return values
+    return {}
+
+
 def read_firefox(base_url: str, cookies_db: Path) -> StoredSession:
-    """Read the Jama session cookies from a Firefox cookies.sqlite (clear text)."""
+    """Read the Jama session cookies from a Firefox profile.
+
+    ``cookies.sqlite`` holds persistent cookies only; Jama's session cookies are
+    taken from the session store next to it.
+    """
     host = _jama_host(base_url)
     tmp_dir, copy = _copy_locked_db(cookies_db)
     try:
-        rows = _read_rows(copy, "SELECT name, value, host FROM moz_cookies")
+        rows = _read_rows(copy, "SELECT name, value, host, originAttributes FROM moz_cookies")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
     values: dict[str, str] = {}
-    for name, value, cookie_host in rows:
-        if name in _WANTED and host_matches(cookie_host or "", host):
-            values[name] = value or ""
+    for name, value, cookie_host, attributes in rows:
+        if (
+            name in _WANTED
+            and value
+            and host_matches(cookie_host or "", host)
+            and _is_default_context(attributes)
+        ):
+            values[name] = value
+    if any(not values.get(name) for name in _WANTED):
+        for name, value in _session_store_values(cookies_db.parent, host).items():
+            values.setdefault(name, value)
     return _build_session(base_url, values)
 
 
@@ -313,8 +463,29 @@ def read_browser_session(
     logger.debug("Reading the Jama session from Firefox")
 
     if cookies_path and cookies_path.is_file():
-        db = cookies_path
-    else:
-        root = firefox_profiles_dir(cookies_path if cookies_path else None)
-        db = _find_firefox_cookie_db(root, profile)
-    return read_firefox(base_url, db)
+        return read_firefox(base_url, cookies_path)
+
+    roots = [cookies_path] if cookies_path else firefox_profile_roots()
+    if not roots:
+        searched = ", ".join(str(root) for root in firefox_root_candidates()) or "-"
+        raise BrowserCookieError(
+            f"No Firefox profile found (looked in: {searched}). Open Firefox once, or pass "
+            "--browser-cookies-path (a cookies.sqlite or the directory with profiles.ini)."
+        )
+
+    dbs: list[Path] = []
+    last_error: BrowserCookieError | None = None
+    for root in roots:
+        try:
+            dbs.append(_find_firefox_cookie_db(root, profile))
+        except BrowserCookieError as e:
+            last_error = e
+    # Several Firefox installs (e.g. Windows and WSL): the most recently used one first.
+    dbs.sort(key=lambda db: _profile_freshness(db.parent), reverse=True)
+    for db in dbs:
+        try:
+            return read_firefox(base_url, db)
+        except BrowserCookieError as e:
+            last_error = e
+    assert last_error is not None
+    raise last_error
