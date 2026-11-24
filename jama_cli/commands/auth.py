@@ -55,6 +55,25 @@ def login(
         str | None,
         typer.Option("--mode", "-m", help="Login mode: browser (default) or form"),
     ] = None,
+    from_browser: Annotated[
+        str | None,
+        typer.Option(
+            "--from-browser",
+            help="Reuse your running browser's Jama session: firefox, chrome or edge "
+            "(no second login, so your browser stays signed in)",
+        ),
+    ] = None,
+    browser_cookie_profile: Annotated[
+        str | None,
+        typer.Option("--browser-cookie-profile", help="Browser profile to read cookies from"),
+    ] = None,
+    browser_cookies_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--browser-cookies-path",
+            help="Path to the browser cookie store (Firefox) or User Data dir (Chrome/Edge)",
+        ),
+    ] = None,
     browser_channel: Annotated[
         str | None,
         typer.Option(
@@ -89,12 +108,26 @@ def login(
 
     Examples:
         jama login                          # Browser login (SSO or native form)
+        jama login --from-browser firefox   # Reuse your running browser's session
         jama login --browser-channel msedge # Use the installed Edge
         jama login --mode form              # No browser; JAMA_USERNAME / JAMA_PASSWORD
         jama login --debug-dir ./login-dbg  # Screenshots for diagnosing a failed login
     """
     profile = _session_profile(ctx)
     settings = profile.session_settings()
+    if from_browser:
+        from jama_cli.core.browser_cookies import BROWSERS, BrowserCookieError, normalise_source
+
+        try:
+            normalise_source(from_browser)
+        except BrowserCookieError:
+            print_error(f"--from-browser must be one of: {', '.join(BROWSERS)}")
+            raise typer.Exit(1) from None
+        settings.session_source = from_browser
+    if browser_cookie_profile:
+        settings.browser_cookie_profile = browser_cookie_profile
+    if browser_cookies_path:
+        settings.browser_cookies_path = browser_cookies_path
     if mode:
         if mode not in ("browser", "form"):
             print_error("--mode must be 'browser' or 'form'")

@@ -59,6 +59,11 @@ class SessionSettings:
     debug_dir: Path | None = None
     session_file: Path | None = None
     keepalive_minutes: float = 0.0
+    # Reuse the session from the user's own browser instead of logging in again.
+    # None | "firefox" | "chrome" | "edge" (also accepts a "browser-" prefix).
+    session_source: str | None = None
+    browser_cookie_profile: str | None = None
+    browser_cookies_path: Path | None = None
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -309,8 +314,47 @@ async def end_session(
             raise CoreException(f"Jama logout request failed: {type(e).__name__}") from e
 
 
+async def browser_cookie_login(
+    settings: SessionSettings,
+    browser: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> StoredSession:
+    """Reuse the Jama session the user's own browser holds (no second login).
+
+    Reads only ``JSESSIONID`` and ``jama-csrf-token`` for the configured host,
+    validates them with the authenticated probe, and returns the session. This
+    is non-interactive, so it works under ``login_interactive: never``.
+    """
+    # Imported here so the dependency is only touched for this mode.
+    from jama_cli.core.browser_cookies import read_browser_session
+
+    session = read_browser_session(
+        settings.base_url,
+        browser,
+        profile=settings.browser_cookie_profile,
+        cookies_path=settings.browser_cookies_path,
+    )
+    result = await probe(settings.base_url, session, transport)
+    if not result.ok:
+        raise UnauthorizedException(
+            f"The Jama session found in {browser} is not valid. Sign in to Jama in the browser "
+            "first; if you just signed out, that session is gone on purpose."
+        )
+    session.username = result.username
+    session.last_validated_at = time.time()
+    logger.info(f"Reused the Jama session from {browser}")
+    return session
+
+
 async def _default_login(settings: SessionSettings, interactive: str) -> StoredSession:
     """Obtain a fresh session according to the login mode and interactivity."""
+    from jama_cli.core.browser_cookies import normalise_source
+
+    browser = normalise_source(settings.session_source)
+    if browser is not None:
+        # Non-interactive: read the browser's existing session, even with "never".
+        return await browser_cookie_login(settings, browser)
+
     if settings.login_mode == "form":
         return await form_login(settings)
     if interactive == "never":
@@ -354,6 +398,11 @@ class SessionManager:
     async def _login_with_transport(
         self, settings: SessionSettings, interactive: str
     ) -> StoredSession:
+        from jama_cli.core.browser_cookies import normalise_source
+
+        browser = normalise_source(settings.session_source)
+        if browser is not None:
+            return await browser_cookie_login(settings, browser, self._transport)
         if settings.login_mode == "form":
             return await form_login(settings, self._transport)
         return await _default_login(settings, interactive)

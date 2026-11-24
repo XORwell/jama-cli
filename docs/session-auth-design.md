@@ -93,6 +93,35 @@ the cookies of the browser context, ignores the landing URL, and tolerates page 
 errors during the SAML redirect chain. Headless is tried first when a browser profile exists;
 a visible login form, or 20 s without a session, switches to a visible window.
 
+## Reusing the browser's session (`--from-browser`)
+
+`session_source` (`firefox` | `chrome` | `edge`) replaces the login with reading the two Jama
+cookies (`JSESSIONID`, `jama-csrf-token`) the user's own browser already holds for the configured
+host. The result is validated with the same `probe()` and stored like any other session. This
+avoids a second session on one-session-per-account instances, where the CLI's own login and the
+user's browser session would otherwise evict each other.
+
+It is wired as a `login_func`, so it feeds `SessionManager.login()` and `recover()` alike: a truly
+dead session (not the CSRF case) is re-read from the browser instead of an interactive login, and
+being non-interactive it honours `login_interactive: never`. Signing out in the browser ends the
+shared session for the CLI too, by design.
+
+Runtime target is "CLI/MCP under WSL, browser on the Windows host"; cookie stores are read from
+`/mnt/c/Users/<windows-user>/...`, with the Windows user resolved via `cmd.exe`, not guessed. The
+live, locked cookie database is never opened in place: it is copied with its `-wal`/`-shm`
+sidecars to a temp file, opened read-only, and deleted afterwards. Only the two cookies, only for
+the configured host, are read; values are never logged or raised.
+
+- Firefox stores values in clear text (`moz_cookies`), so everything runs inside WSL.
+- Chrome/Edge encrypt the values and, since v127, bind the key to the Windows user (App-Bound
+  Encryption). Python reads the encrypted blobs and the wrapped key from the copied database and
+  `Local State`, then hands them to a bundled PowerShell helper
+  (`jama_cli/core/jama_read_chrome_cookies.ps1`, fed on stdin so no Windows path is translated).
+  The helper runs as the user, DPAPI-unwraps the key and AES-GCM-decrypts the two values (v10),
+  and prints only those values as JSON. App-Bound (v20) blobs are not unwrapped; the helper fails
+  with a clear message and the CLI stops rather than silently logging in again. The helper
+  contract (base64 blobs in, two values out) is mocked in the tests.
+
 ## Verified against a real Jama instance
 
 Checked against a Jama Cloud instance with SSO on 2026-11-24:

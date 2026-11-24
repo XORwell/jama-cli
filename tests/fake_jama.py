@@ -74,6 +74,19 @@ class FakeJama:
         with self._lock:
             self.sessions.clear()
 
+    def plant_session(self, user: str = "alice") -> tuple[str, str]:
+        """Create one authenticated session and return its ``(JSESSIONID, csrf)``.
+
+        Used to simulate a session the user established elsewhere (e.g. in a real
+        browser) without going through the login form.
+        """
+        with self._lock:
+            before = self.login_count
+            sid, csrf = self._authenticate(user)
+            # A session the user already has is not a login by this CLI.
+            self.login_count = before
+            return sid, csrf
+
     def rotate_csrf(self) -> None:
         """Make every client-held CSRF token stale."""
         with self._lock:

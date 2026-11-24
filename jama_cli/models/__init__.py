@@ -56,6 +56,16 @@ class JamaProfile(BaseModel):
     session_keepalive_minutes: float = Field(
         default=0.0, description="Keepalive interval for the MCP server (0 = off)", ge=0
     )
+    session_source: str | None = Field(
+        default=None,
+        description="Reuse the browser's session: firefox, chrome or edge (None = log in)",
+    )
+    browser_cookie_profile: str | None = Field(
+        default=None, description="Browser profile to read cookies from (default: the main one)"
+    )
+    browser_cookies_path: str | None = Field(
+        default=None, description="Override path to the browser cookie store / User Data dir"
+    )
 
     @field_validator("sso_selectors", mode="before")
     @classmethod
@@ -129,6 +139,9 @@ class JamaProfile(BaseModel):
             debug_dir=as_path(self.login_debug_dir),
             session_file=as_path(self.session_file),
             keepalive_minutes=self.session_keepalive_minutes,
+            session_source=self.session_source,
+            browser_cookie_profile=self.browser_cookie_profile,
+            browser_cookies_path=as_path(self.browser_cookies_path),
         )
 
 
