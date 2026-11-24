@@ -473,8 +473,8 @@ The MCP server exposes 70 Jama API operations:
 | Types | get_item_types, get_item_type |
 | Pick Lists | get_pick_lists, get_pick_list, get_pick_list_options |
 | Tags | get_tags, get_tagged_items |
-| Tests | get_test_plans, get_test_cycles, get_test_runs |
-| Attachments | get_attachments, upload_attachment |
+| Tests | get_test_plans, get_test_cycles, get_test_runs, get_test_run, update_test_run, attach_screenshot_to_test_run |
+| Attachments | get_attachments, upload_attachment, download_attachment |
 | ... | See full list in API documentation |
 
 ## Global Options
