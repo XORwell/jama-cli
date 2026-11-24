@@ -357,6 +357,80 @@ jama migrate copy 123 456 --from staging --to production
 jama migrate info backup.json
 ```
 
+### Attachments
+```bash
+# Upload a file and link it to an item (shows on the item's Attachments tab)
+jama attachments upload 456 screenshot.png
+jama attachments upload 456 report.pdf --name "Test report" --description "Nightly run"
+jama attachments upload 456 screenshot.png --no-link    # create it, do not link it
+jama attachments upload 456 screenshot.png --json       # ids and embed URL for scripts
+
+# Download
+jama attachments download 789 -o report.pdf             # by attachment ID
+jama attachments download-url "https://jama.example.com/contour/attachment/9000/shot.png" -o shot.png
+```
+
+`upload` prints three things: the **attachment ID**, the **file ID** and the
+**embed URL**. They are not interchangeable: an inline image in a rich-text field
+must use the embed URL (`<base>/attachment/<fileId>/<file name>`), which is built
+from the file ID. A URL built from the attachment ID shows a broken image. After
+every upload the embed URL is checked through `GET /rest/v1/files?url=...`; if it
+does not load, the command fails.
+
+- Content type comes from the file extension (png, jpg/jpeg, gif, webp, svg, pdf;
+  anything else is sent as `application/octet-stream`).
+- Files larger than 50 MB are rejected; set `JAMA_MAX_ATTACHMENT_BYTES` to change the limit.
+- Uploading the same file to the same project again reuses the earlier attachment
+  instead of creating a duplicate (a local map under `~/.cache/jama-cli/uploads/`
+  holds ids and URLs only). Use `--no-cache` to force a new upload.
+
+### Screenshots in Test Runs
+```bash
+# Look at a test run and its steps
+jama -o json testruns get 1234
+
+# Embed screenshots in the run-level "Actual results"
+jama testruns add-screenshot 1234 shot1.png shot2.png --caption "After login"
+
+# ... or in the actual results of step 2 (steps are numbered from 1)
+jama testruns add-screenshot 1234 failure.png --step 2 --caption "Error dialog"
+
+# Write text/HTML: appended by default, --replace replaces only that field
+jama testruns set-actual 1234 --html "<p>Works as expected</p>"
+jama testruns set-actual 1234 --file result.html --step 3
+jama testruns set-actual 1234 --html "<p>Retested</p>" --step 3 --replace
+```
+
+These commands change a test run with a read-modify-write: the run is read, only
+the targeted field is changed, the complete step list is sent back, and the run is
+read again to check that the other steps, their statuses and the existing HTML are
+unchanged. Existing content is appended to, never replaced, unless `--replace` is
+given. Running the same `add-screenshot` again neither uploads the file again nor
+adds a second image. If Jama does not allow an attachment to be linked to a test
+run, the image is still embedded and a warning says that it is missing from the
+Attachments tab. If the run cannot be edited (locked cycle, missing permission),
+Jama's error is shown and nothing is retried.
+
+The same functions are available in Python (`JamaClient.upload_attachment`,
+`download_attachment`, `download_embedded`, `embed_image_html`,
+`append_to_actual_results`, `attach_screenshots_to_test_run`) and as MCP tools
+(`upload_attachment`, `attach_screenshot_to_test_run`, `download_attachment`,
+`get_test_run`, `update_test_run`). The MCP tools accept a file path on the
+server's machine or base64 content, so they also work when the MCP client runs
+on another machine.
+
+#### Attachments with a browser-session (SSO) login
+
+With `auth_type: session`, Jama may refuse the REST call that creates an
+attachment for SSO users. Only in that case, and only under session auth,
+jama-cli falls back to the endpoint the Jama web UI itself uses
+(`POST <base>/ui/internal/attachments`), which creates the attachment and links
+it to the item in one step. **This endpoint is not part of Jama's documented REST
+API**: it can change or disappear with any Jama release. With `basic`, `api_key`
+and `oauth` it is never called; a refused upload is reported as Jama's error.
+Because that endpoint always links the attachment, `--no-link` cannot be honoured
+when the fallback is used (a warning says so).
+
 ## MCP Server
 
 ### For Claude Desktop / Cline
