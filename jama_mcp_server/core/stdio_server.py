@@ -314,8 +314,259 @@ class JamaStdioMCPServer:
                         "type": "object",
                         "properties": {
                             "filter_id": {"type": "integer", "description": "Filter ID"},
+                            "project_id": {
+                                "type": "integer",
+                                "description": "Project ID to run the filter in (optional)",
+                            },
                         },
                         "required": ["filter_id"],
+                    },
+                ),
+                Tool(
+                    name="get_items_page",
+                    description="Get one page of items from a project (use for large projects instead of get_items)",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "project_id": {"type": "integer", "description": "Project ID"},
+                            "start_at": {
+                                "type": "integer",
+                                "description": "Index of the first item (default 0)",
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "Page size, 1-50 (default 50)",
+                            },
+                        },
+                        "required": ["project_id"],
+                    },
+                ),
+                Tool(
+                    name="search_items",
+                    description="Search items by text, optionally limited to a project and item type",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "contains": {"type": "string", "description": "Text to search for"},
+                            "project_id": {
+                                "type": "integer",
+                                "description": "Project ID (optional)",
+                            },
+                            "item_type_id": {
+                                "type": "integer",
+                                "description": "Item type ID (optional)",
+                            },
+                        },
+                    },
+                ),
+                Tool(
+                    name="replace_item",
+                    description="Replace an item completely (PUT). Modifies Jama: fields not sent are cleared; use update_item to change single fields",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "project_id": {"type": "integer", "description": "Project ID"},
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                            "item_type_id": {"type": "integer", "description": "Item type ID"},
+                            "child_item_type_id": {
+                                "type": "integer",
+                                "description": "Child item type ID (for Sets/Components). Omit if not applicable.",
+                            },
+                            "location": {
+                                "type": "object",
+                                "description": 'Parent location, e.g. {"item": 12345}',
+                            },
+                            "fields": {"type": "object", "description": "All item fields"},
+                        },
+                        "required": ["project_id", "item_id", "item_type_id", "location", "fields"],
+                    },
+                ),
+                Tool(
+                    name="get_item_version",
+                    description="Get a specific version of an item",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                            "version_num": {"type": "integer", "description": "Version number"},
+                        },
+                        "required": ["item_id", "version_num"],
+                    },
+                ),
+                Tool(
+                    name="get_item_lock",
+                    description="Get the lock status of an item",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                        },
+                        "required": ["item_id"],
+                    },
+                ),
+                Tool(
+                    name="set_item_lock",
+                    description="Lock or unlock an item. Modifies Jama.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                            "locked": {
+                                "type": "boolean",
+                                "description": "true to lock, false to unlock",
+                            },
+                        },
+                        "required": ["item_id", "locked"],
+                    },
+                ),
+                Tool(
+                    name="get_relationships",
+                    description="Get all relationships in a project",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "project_id": {"type": "integer", "description": "Project ID"},
+                        },
+                        "required": ["project_id"],
+                    },
+                ),
+                Tool(
+                    name="get_relationship",
+                    description="Get a specific relationship by ID",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "relationship_id": {
+                                "type": "integer",
+                                "description": "Relationship ID",
+                            },
+                        },
+                        "required": ["relationship_id"],
+                    },
+                ),
+                Tool(
+                    name="get_item_upstream_related",
+                    description="Get the items upstream of an item (the items themselves, not the relationships)",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                        },
+                        "required": ["item_id"],
+                    },
+                ),
+                Tool(
+                    name="get_item_downstream_related",
+                    description="Get the items downstream of an item (the items themselves, not the relationships)",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "item_id": {"type": "integer", "description": "Item ID"},
+                        },
+                        "required": ["item_id"],
+                    },
+                ),
+                Tool(
+                    name="delete_relationship",
+                    description="Delete a relationship. Modifies Jama.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "relationship_id": {
+                                "type": "integer",
+                                "description": "Relationship ID",
+                            },
+                        },
+                        "required": ["relationship_id"],
+                    },
+                ),
+                Tool(
+                    name="get_relationship_type",
+                    description="Get a specific relationship type by ID",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "relationship_type_id": {
+                                "type": "integer",
+                                "description": "Relationship type ID",
+                            },
+                        },
+                        "required": ["relationship_type_id"],
+                    },
+                ),
+                Tool(
+                    name="get_item_types",
+                    description="Get all item types",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {},
+                    },
+                ),
+                Tool(
+                    name="get_pick_list",
+                    description="Get a specific pick list by ID",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pick_list_id": {"type": "integer", "description": "Pick list ID"},
+                        },
+                        "required": ["pick_list_id"],
+                    },
+                ),
+                Tool(
+                    name="get_pick_list_options",
+                    description="Get the options of a pick list",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "pick_list_id": {"type": "integer", "description": "Pick list ID"},
+                        },
+                        "required": ["pick_list_id"],
+                    },
+                ),
+                Tool(
+                    name="get_tagged_items",
+                    description="Get all items that carry a tag",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "tag_id": {"type": "integer", "description": "Tag ID"},
+                        },
+                        "required": ["tag_id"],
+                    },
+                ),
+                Tool(
+                    name="create_tag",
+                    description="Create a tag in a project. Modifies Jama.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Tag name"},
+                            "project_id": {"type": "integer", "description": "Project ID"},
+                        },
+                        "required": ["name", "project_id"],
+                    },
+                ),
+                Tool(
+                    name="get_baseline_versioned_items",
+                    description="Get the versioned items contained in a baseline",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "baseline_id": {"type": "integer", "description": "Baseline ID"},
+                        },
+                        "required": ["baseline_id"],
+                    },
+                ),
+                Tool(
+                    name="get_user",
+                    description="Get a specific user by ID",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "user_id": {"type": "integer", "description": "User ID"},
+                        },
+                        "required": ["user_id"],
                     },
                 ),
                 Tool(
@@ -555,7 +806,79 @@ class JamaStdioMCPServer:
             return await api.get_attachment(arguments["attachment_id"])
 
         elif name == "get_filter_results":
-            return await api.get_filter_results(arguments["filter_id"])
+            return await api.get_filter_results(arguments["filter_id"], arguments.get("project_id"))
+
+        elif name == "get_items_page":
+            return await api.get_items_page(
+                arguments["project_id"],
+                arguments.get("start_at", 0),
+                arguments.get("max_results", 50),
+            )
+
+        elif name == "search_items":
+            return await api.get_abstract_items(
+                project=arguments.get("project_id"),
+                item_type=arguments.get("item_type_id"),
+                contains=arguments.get("contains"),
+            )
+
+        elif name == "replace_item":
+            return await api.put_item(
+                arguments["project_id"],
+                arguments["item_id"],
+                arguments["item_type_id"],
+                arguments.get("child_item_type_id"),
+                arguments["location"],
+                arguments["fields"],
+            )
+
+        elif name == "get_item_version":
+            return await api.get_item_version(arguments["item_id"], arguments["version_num"])
+
+        elif name == "get_item_lock":
+            return await api.get_item_lock(arguments["item_id"])
+
+        elif name == "set_item_lock":
+            return await api.put_item_lock(arguments["item_id"], arguments["locked"])
+
+        elif name == "get_relationships":
+            return await api.get_relationships(arguments["project_id"])
+
+        elif name == "get_relationship":
+            return await api.get_relationship(arguments["relationship_id"])
+
+        elif name == "get_item_upstream_related":
+            return await api.get_items_upstream_related(arguments["item_id"])
+
+        elif name == "get_item_downstream_related":
+            return await api.get_items_downstream_related(arguments["item_id"])
+
+        elif name == "delete_relationship":
+            return await api.delete_relationship(arguments["relationship_id"])
+
+        elif name == "get_relationship_type":
+            return await api.get_relationship_type(arguments["relationship_type_id"])
+
+        elif name == "get_item_types":
+            return await api.get_item_types()
+
+        elif name == "get_pick_list":
+            return await api.get_pick_list(arguments["pick_list_id"])
+
+        elif name == "get_pick_list_options":
+            return await api.get_pick_list_options(arguments["pick_list_id"])
+
+        elif name == "get_tagged_items":
+            return await api.get_tagged_items(arguments["tag_id"])
+
+        elif name == "create_tag":
+            return await api.post_tag(arguments["name"], arguments["project_id"])
+
+        elif name == "get_baseline_versioned_items":
+            return await api.get_baselines_versioneditems(arguments["baseline_id"])
+
+        elif name == "get_user":
+            return await api.get_user(arguments["user_id"])
 
         elif name == "create_relationship":
             return await api.post_relationship(
