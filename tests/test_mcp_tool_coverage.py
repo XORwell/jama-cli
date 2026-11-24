@@ -144,3 +144,23 @@ async def test_every_listed_tool_is_dispatched(server: JamaStdioMCPServer) -> No
             await server._execute_tool(tool.name, arguments)
         except ValueError as e:
             assert "Unknown tool" not in str(e), f"{tool.name} is listed but not dispatched"
+
+
+async def test_both_servers_expose_the_same_shared_tool_set(server: JamaStdioMCPServer) -> None:
+    """Attachment and test run tools come from one registry used by stdio and HTTP mode."""
+    from jama_mcp_server.core import attachment_tools
+    from jama_mcp_server.core.server import JamaMCPServer
+
+    stdio = {
+        tool.name: (tool.description, tool.inputSchema)
+        for tool in await _listed_tools(server)
+        if tool.name in attachment_tools.TOOL_NAMES
+    }
+    http = {
+        tool["name"]: (tool["description"], tool["inputSchema"])
+        for tool in JamaMCPServer(config=server.config).shared_tools()
+    }
+
+    assert set(stdio) == set(http) == set(attachment_tools.TOOL_NAMES)
+    assert stdio == http
+    assert {"update_test_run", "upload_attachment", "get_test_run"} <= set(http)

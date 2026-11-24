@@ -29,8 +29,94 @@ HOST = "https://jama.example.com"
 SESSION_ID = "fake-session-id"
 CSRF_TOKEN = "fake-csrf-token"
 
-# The result fields a PUT replaces wholesale.
-RESULT_FIELDS = ("testRunSteps", "actualResults", "assignedTo")
+# Run-level result fields a PUT replaces wholesale (worst case: not sent = gone).
+RESULT_FIELDS = ("actualResults", "assignedTo")
+# Step keys a PUT stores. Anything else in a step (``actualResults``,
+# ``actualResult``, ``actual``, ...) is accepted with OK and silently dropped.
+STORED_STEP_KEYS = ("action", "expectedResult", "notes", "status", "result")
+
+TEST_RUN_TYPE_ID = 89
+FRESH_RUN = 78
+
+
+def test_run_item_type() -> dict[str, Any]:
+    """The test run item type as a real instance reports it."""
+    return {
+        "id": TEST_RUN_TYPE_ID,
+        "typeKey": "TSTRN",
+        "display": "Test Run",
+        "fields": [
+            {"id": 1, "name": "name", "fieldType": "STRING", "readOnly": False},
+            {"id": 2, "name": "testRunStatus", "fieldType": "LOOKUP", "readOnly": True},
+            {"id": 3, "name": "assignedTo", "fieldType": "USER", "readOnly": False},
+            {"id": 4, "name": "actualResults", "fieldType": "TEXT", "readOnly": False},
+            # Marked read-only, although a PUT of this field does store step
+            # results and statuses.
+            {"id": 5, "name": "testRunSteps", "fieldType": "STEPS", "readOnly": True},
+            {
+                "id": 6,
+                "name": f"defects_found${TEST_RUN_TYPE_ID}",
+                "fieldType": "STRING",
+                "readOnly": False,
+            },
+        ],
+    }
+
+
+test_run_item_type.__test__ = False  # type: ignore[attr-defined]
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or value == "" or value == []
+
+
+def without_empty_fields(run: dict[str, Any]) -> dict[str, Any]:
+    """A run as GET returns it: empty fields are left out, also inside steps."""
+    shown = copy.deepcopy(run)
+    fields = {k: v for k, v in shown.get("fields", {}).items() if not _is_empty(v)}
+    if isinstance(fields.get("testRunSteps"), list):
+        fields["testRunSteps"] = [
+            {k: v for k, v in step.items() if not _is_empty(v)} for step in fields["testRunSteps"]
+        ]
+    shown["fields"] = fields
+    return shown
+
+
+def run_status(steps: list[dict[str, Any]]) -> str:
+    """Jama recomputes the run status from the step statuses."""
+    statuses = {step.get("status", "NOT_RUN") for step in steps}
+    if statuses <= {"NOT_RUN"}:
+        return "NOT_RUN"
+    if len(statuses) == 1:
+        return statuses.pop()
+    return "INPROGRESS"
+
+
+def fresh_test_run() -> dict[str, Any]:
+    """A run just generated from a test plan: nothing executed, no result keys anywhere."""
+    return {
+        "id": FRESH_RUN,
+        "project": 3,
+        "itemType": TEST_RUN_TYPE_ID,
+        "fields": {
+            "name": "Fresh run",
+            "testCycle": 40,
+            "testRunStatus": "NOT_RUN",
+            "testRunSteps": [
+                {
+                    "action": "<p>Open the page</p>",
+                    "expectedResult": "<p>Page loads</p>",
+                    "status": "NOT_RUN",
+                },
+                {
+                    "action": "<p>Log in</p>",
+                    "expectedResult": "<p>Dashboard</p>",
+                    "notes": "<p>note</p>",
+                    "status": "NOT_RUN",
+                },
+            ],
+        },
+    }
 
 
 def parse_multipart(request: httpx.Request) -> dict[str, dict[str, Any]]:
@@ -70,23 +156,20 @@ def default_test_run() -> dict[str, Any]:
                 {
                     "action": "<p>Open the page</p>",
                     "expectedResult": "<p>Page loads</p>",
-                    "notes": "",
                     "status": "PASSED",
-                    "actualResults": "<p>Loaded in <b>1s</b></p>",
+                    "result": "<p>Loaded in <b>1s</b></p>",
                 },
                 {
                     "action": "<p>Log in</p>",
                     "expectedResult": "<p>Dashboard</p>",
                     "notes": "<p>note</p>",
                     "status": "FAILED",
-                    "actualResults": "<p>Error 500</p>",
+                    "result": "<p>Error 500</p>",
                 },
                 {
                     "action": "<p>Log out</p>",
                     "expectedResult": "<p>Login page</p>",
-                    "notes": "",
                     "status": "NOT_RUN",
-                    "actualResults": "",
                 },
             ],
         },
@@ -101,9 +184,17 @@ class FakeJamaAttachments:
 
         self.items: dict[int, dict[str, Any]] = {
             10: {"id": 10, "project": 3, "fields": {"name": "Requirement"}},
-            77: {"id": 77, "project": 3, "fields": {"name": "Login works"}},
         }
-        self.test_runs: dict[int, dict[str, Any]] = {77: default_test_run()}
+        self.test_runs: dict[int, dict[str, Any]] = {
+            77: default_test_run(),
+            FRESH_RUN: fresh_test_run(),
+        }
+        # Run-level fields a PUT replaces (names as on this instance).
+        self.result_fields: tuple[str, ...] = RESULT_FIELDS
+        self.item_types: list[dict[str, Any]] = [
+            {"id": 33, "typeKey": "TXT", "display": "Text", "fields": []},
+            test_run_item_type(),
+        ]
         self.test_cycles: dict[int, dict[str, Any]] = {
             40: {"id": 40, "project": 3, "fields": {"name": "Cycle"}}
         }
@@ -275,6 +366,9 @@ class FakeJamaAttachments:
 
         if segments[0] == "items" and len(segments) >= 2:
             item_id = int(segments[1])
+            # Test runs are not items: every items/{testRunId}/... answers 404.
+            if item_id in self.test_runs:
+                return self._error(404, f"Item with ID {item_id} does not exist")
             if len(segments) == 2 and method == "GET":
                 if item_id not in self.items:
                     return self._error(404, "Item not found")
@@ -302,24 +396,46 @@ class FakeJamaAttachments:
             cycle = self.test_cycles.get(int(segments[1]))
             return self._ok(copy.deepcopy(cycle)) if cycle else self._error(404, "Not found")
 
+        if segments[0] == "itemtypes" and method == "GET":
+            if len(segments) == 1:
+                listed = copy.deepcopy(self.item_types)
+                return self._ok(
+                    listed,
+                    pageInfo={
+                        "startIndex": 0,
+                        "resultCount": len(listed),
+                        "totalResults": len(listed),
+                    },
+                )
+            found = next((t for t in self.item_types if t["id"] == int(segments[1])), None)
+            return self._ok(copy.deepcopy(found)) if found else self._error(404, "Not found")
+
         if segments[0] == "testruns" and len(segments) == 2:
             run = self.test_runs.get(int(segments[1]))
             if run is None:
                 return self._error(404, "Test run not found")
             if method == "GET":
-                return self._ok(copy.deepcopy(run))
+                return self._ok(without_empty_fields(run))
             if method == "PUT":
                 body = json.loads(request.content)
                 self.run_puts.append(body)
                 if self.refuse_run_update:
                     return self._error(*self.refuse_run_update)
                 sent = body.get("fields", {})
-                # Worst case: the result fields are replaced, not merged.
-                for name in RESULT_FIELDS:
+                # Worst case: the run-level result fields are replaced, not merged.
+                for name in self.result_fields:
                     if name in sent:
                         run["fields"][name] = copy.deepcopy(sent[name])
                     else:
                         run["fields"].pop(name, None)
+                # The steps field is "readOnly" in the item type, but a PUT stores
+                # the known keys of each step and silently drops every other key.
+                if "testRunSteps" in sent:
+                    run["fields"]["testRunSteps"] = [
+                        {k: copy.deepcopy(v) for k, v in step.items() if k in STORED_STEP_KEYS}
+                        for step in sent["testRunSteps"]
+                    ]
+                    run["fields"]["testRunStatus"] = run_status(run["fields"]["testRunSteps"])
                 return self._ok()
 
         return self._error(404, "Not found")

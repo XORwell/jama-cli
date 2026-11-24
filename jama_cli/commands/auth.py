@@ -12,7 +12,13 @@ import typer
 from jama_cli.config import get_profile_or_env
 from jama_cli.core.session import SessionManager
 from jama_cli.models import JamaProfile
-from jama_cli.output import OutputFormat, format_single_item, print_error, print_success
+from jama_cli.output import (
+    OutputFormat,
+    format_single_item,
+    print_error,
+    print_success,
+    print_warning,
+)
 
 
 def _session_profile(ctx: typer.Context) -> JamaProfile:
@@ -59,8 +65,8 @@ def login(
         str | None,
         typer.Option(
             "--from-browser",
-            help="Reuse your running browser's Jama session: firefox, chrome or edge "
-            "(no second login, so your browser stays signed in)",
+            help="Reuse your running Firefox's Jama session: firefox "
+            "(no second login, so your browser stays signed in; Chrome/Edge are not supported)",
         ),
     ] = None,
     browser_cookie_profile: Annotated[
@@ -71,7 +77,7 @@ def login(
         Path | None,
         typer.Option(
             "--browser-cookies-path",
-            help="Path to the browser cookie store (Firefox) or User Data dir (Chrome/Edge)",
+            help="Path to Firefox's cookies.sqlite, or to the directory with profiles.ini",
         ),
     ] = None,
     browser_channel: Annotated[
@@ -108,7 +114,7 @@ def login(
 
     Examples:
         jama login                          # Browser login (SSO or native form)
-        jama login --from-browser firefox   # Reuse your running browser's session
+        jama login --from-browser firefox   # Reuse your running Firefox's session
         jama login --browser-channel msedge # Use the installed Edge
         jama login --mode form              # No browser; JAMA_USERNAME / JAMA_PASSWORD
         jama login --debug-dir ./login-dbg  # Screenshots for diagnosing a failed login
@@ -116,12 +122,13 @@ def login(
     profile = _session_profile(ctx)
     settings = profile.session_settings()
     if from_browser:
-        from jama_cli.core.browser_cookies import BROWSERS, BrowserCookieError, normalise_source
+        from jama_cli.core.browser_cookies import BrowserCookieError, normalise_source
 
         try:
             normalise_source(from_browser)
-        except BrowserCookieError:
-            print_error(f"--from-browser must be one of: {', '.join(BROWSERS)}")
+        except BrowserCookieError as e:
+            # Fail fast; never fall back to a fresh login from here.
+            print_error(str(e))
             raise typer.Exit(1) from None
         settings.session_source = from_browser
     if browser_cookie_profile:
@@ -152,19 +159,43 @@ def login(
     print_success(f"Logged in to {settings.base_url} as {session.username or 'unknown user'}")
 
 
-def logout(ctx: typer.Context) -> None:
-    """Log out of Jama, release the license seat and delete the stored session."""
+def logout(
+    ctx: typer.Context,
+    end_server_session: Annotated[
+        bool,
+        typer.Option(
+            "--end-server-session",
+            help="Also end a session that was taken over from your browser "
+            "(--from-browser). This signs you out in the browser too.",
+        ),
+    ] = False,
+) -> None:
+    """Log out of Jama and delete the stored session.
+
+    A session from `jama login` is ended on the server, which releases the
+    license seat. A session taken over with `--from-browser` is your browser's
+    own session, so only the stored copy is removed and the browser stays
+    signed in, unless you pass --end-server-session.
+    """
     profile = _session_profile(ctx)
+    manager = SessionManager(profile.session_settings())
     try:
-        had_session = asyncio.run(SessionManager(profile.session_settings()).logout())
+        # None keeps the default per session source; the flag can only add the
+        # server logout, never suppress it for a session this tool logged in.
+        result = asyncio.run(manager.logout(True if end_server_session else None))
     except Exception as e:
         print_error(f"Logout failed (the stored session was removed anyway): {e}")
         raise typer.Exit(1) from e
 
-    if had_session:
+    if not result.had_session:
+        print_success("No stored session")
+    elif not result.server_session_ended:
+        print_success("Removed the stored session; your browser session is still active")
+    elif result.source and result.source.startswith("browser-"):
+        print_warning("The session was shared with your browser: you are signed out there too.")
         print_success("Logged out and removed the stored session")
     else:
-        print_success("No stored session")
+        print_success("Logged out and removed the stored session")
 
 
 def status(ctx: typer.Context) -> None:
@@ -186,6 +217,7 @@ def status(ctx: typer.Context) -> None:
         "base_url": info["base_url"],
         "logged_in": info["logged_in"],
         "username": info["username"] or "-",
+        "source": info["source"] or "-",
         "age": _format_age(info["age_seconds"]),
         "created": _format_time(info["created_at"]),
         "last_validated": _format_time(info["last_validated_at"]),

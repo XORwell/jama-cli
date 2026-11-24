@@ -16,12 +16,14 @@ from jama_cli.core.sync_wrapper import SyncJamaApi
 from jama_cli.core.testruns import (
     PUT_FIELDS,
     TestRunError,
+    TestRunSchema,
     TestRunService,
     TestRunVerificationError,
     build_put_body,
+    step_result,
 )
 from jama_cli.models import JamaProfile
-from tests.fake_jama_attachments import FakeJamaAttachments
+from tests.fake_jama_attachments import FRESH_RUN, FakeJamaAttachments, test_run_item_type
 from tests.test_attachments import PNG, make_http
 
 RUN = 77
@@ -94,7 +96,7 @@ class TestAppendToActualResults:
 
         fields = fields_of(fake)
         steps = fields["testRunSteps"]
-        assert steps[1]["actualResults"] == "<p>Error 500</p><p>seen</p>"
+        assert steps[1]["result"] == "<p>Error 500</p><p>seen</p>"
         # Everything else is byte-identical.
         assert steps[0] == original["testRunSteps"][0]
         assert steps[2] == original["testRunSteps"][2]
@@ -132,7 +134,7 @@ class TestAppendToActualResults:
         await runs.append_to_actual_results(RUN, "<p>new</p>", step=1, mode="replace")
 
         steps = steps_of(fake)
-        assert steps[0]["actualResults"] == "<p>new</p>"
+        assert steps[0]["result"] == "<p>new</p>"
         assert steps[0]["status"] == "PASSED"
         assert steps[1:] == original["testRunSteps"][1:]
         assert fields_of(fake)["actualResults"] == original["actualResults"]
@@ -183,19 +185,26 @@ class TestAppendToActualResults:
         assert len(fake.run_puts) == 1
         assert fields_of(fake) == original
 
-    async def test_step_field_name_follows_the_run(
+    async def test_step_that_still_carries_actual_results_is_read_correctly(
         self, fake: FakeJamaAttachments, tmp_path: Path
     ) -> None:
-        """An instance that calls the per-step field ``result`` is handled."""
-        for step in steps_of(fake):
-            step["result"] = step.pop("actualResults")
+        """``actualResults`` on a step is a read-side fallback; it is never written."""
+        legacy = {"action": "<p>a</p>", "status": "PASSED", "actualResults": "<p>old</p>"}
+        assert step_result(legacy) == "<p>old</p>"
+        assert step_result({**legacy, "result": "<p>new</p>"}) == "<p>new</p>"
+        assert step_result({"action": "<p>a</p>"}) is None
+
+        step = steps_of(fake)[0]
+        step["actualResults"] = step.pop("result")
         runs = make_runs(fake, tmp_path)
 
         update = await runs.append_to_actual_results(RUN, "<p>x</p>", step=1)
 
         assert update.field_name == "result"
         assert steps_of(fake)[0]["result"] == "<p>Loaded in <b>1s</b></p><p>x</p>"
-        assert "actualResults" not in steps_of(fake)[0]
+        assert all(
+            "actualResults" not in sent for sent in fake.run_puts[0]["fields"]["testRunSteps"]
+        )
 
     async def test_write_that_jama_does_not_store_is_reported(
         self, fake: FakeJamaAttachments, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -256,6 +265,197 @@ class TestAppendToActualResults:
 
 
 # ---------------------------------------------------------------------------
+# What a real instance showed: fresh runs, the ``result`` step key, item types
+# ---------------------------------------------------------------------------
+
+
+class TestObservedBehaviour:
+    async def test_get_omits_empty_fields(self, fake: FakeJamaAttachments, tmp_path: Path) -> None:
+        run = await make_runs(fake, tmp_path).get_test_run(FRESH_RUN)
+
+        assert "actualResults" not in run["fields"]
+        for step in run["fields"]["testRunSteps"]:
+            assert set(step) <= {"action", "expectedResult", "notes", "status"}
+            assert "result" not in step and "actualResults" not in step
+
+    async def test_first_write_to_a_fresh_step_lands_in_result(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        """No step has a result key yet. The old code wrote ``actualResults``, which Jama drops."""
+        runs = make_runs(fake, tmp_path)
+
+        update = await runs.append_to_actual_results(FRESH_RUN, "<p>seen</p>", step=2)
+
+        steps = fake.test_runs[FRESH_RUN]["fields"]["testRunSteps"]
+        assert steps[1]["result"] == "<p>seen</p>"
+        assert update.updated is True and update.field_name == "result"
+        assert update.html == "<p>seen</p>"
+        assert "result" not in steps[0]
+        assert [s["status"] for s in steps] == ["NOT_RUN", "NOT_RUN"]
+        assert "actualResults" not in fake.test_runs[FRESH_RUN]["fields"]
+
+    async def test_first_run_level_write_to_a_fresh_run(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        """The item type lists the field; GET omitting it means empty, not unknown."""
+        runs = make_runs(fake, tmp_path)
+
+        update = await runs.append_to_actual_results(FRESH_RUN, "<p>first</p>")
+
+        assert fake.test_runs[FRESH_RUN]["fields"]["actualResults"] == "<p>first</p>"
+        assert update.field_name == "actualResults"
+
+    async def test_writing_never_sends_a_step_actual_results_key(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        runs = make_runs(fake, tmp_path)
+
+        await runs.append_to_actual_results(FRESH_RUN, "<p>a</p>", step=1)
+        await runs.append_to_actual_results(RUN, "<p>b</p>", step=3, mode="replace")
+        await runs.attach_screenshots_to_test_run(FRESH_RUN, [png], step=2)
+        await runs.update_test_run(RUN, step=1, step_fields={"actualResults": "<p>c</p>"})
+        await runs.update_test_run(RUN, {"fields": {"testRunSteps": [{"status": "FAILED"}]}})
+
+        assert len(fake.run_puts) == 5
+        for put in fake.run_puts:
+            for step in put["fields"]["testRunSteps"]:
+                assert not {"actualResults", "actualResult", "actual"} & set(step)
+
+    async def test_step_actual_results_in_an_update_is_written_as_result(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        runs = make_runs(fake, tmp_path)
+
+        result = await runs.update_test_run(
+            FRESH_RUN, step=1, step_fields={"actualResults": "<p>c</p>"}
+        )
+
+        assert fake.test_runs[FRESH_RUN]["fields"]["testRunSteps"][0]["result"] == "<p>c</p>"
+        assert any("written as 'result'" in warning for warning in result["warnings"])
+        with pytest.raises(TestRunError, match="both 'result' and 'actualResults'"):
+            await runs.update_test_run(
+                FRESH_RUN, step=1, step_fields={"actualResults": "<p>x</p>", "result": "<p>y</p>"}
+            )
+
+    async def test_status_update_through_step_fields(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        runs = make_runs(fake, tmp_path)
+        before = copy.deepcopy(fake.test_runs[FRESH_RUN]["fields"]["testRunSteps"])
+
+        result = await runs.update_test_run(FRESH_RUN, step=1, step_fields={"status": "PASSED"})
+
+        fields = fake.test_runs[FRESH_RUN]["fields"]
+        assert fields["testRunSteps"][0] == {**before[0], "status": "PASSED"}
+        assert fields["testRunSteps"][1] == before[1]
+        assert result["updated"] is True and result["updated_steps"] == [1]
+        # Jama recomputes the run status; that is not a collateral change.
+        assert fields["testRunStatus"] == "INPROGRESS"
+        assert result["warnings"] == []
+
+    async def test_step_key_that_jama_drops_is_reported(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        runs = make_runs(fake, tmp_path)
+
+        with pytest.raises(TestRunVerificationError, match="did not store step 1: comment"):
+            await runs.update_test_run(FRESH_RUN, step=1, step_fields={"comment": "x"})
+
+    async def test_read_only_flag_of_the_steps_field_does_not_block_a_put(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        runs = make_runs(fake, tmp_path)
+        schema = await runs.schema()
+
+        assert schema.steps == "testRunSteps" and schema.steps_read_only is True
+        await runs.append_to_actual_results(FRESH_RUN, "<p>x</p>", step=1)
+        assert len(fake.run_puts) == 1
+
+
+class TestItemTypeDrivenFields:
+    async def test_test_run_type_is_found_by_type_key_not_by_id(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        fake.item_types[-1]["id"] = 4711
+        fake.item_types.reverse()
+        runs = make_runs(fake, tmp_path)
+
+        schema = await runs.schema()
+
+        assert schema.item_type_id == 4711
+        assert schema.actual_results == "actualResults"
+        assert schema.actual_results_read_only is False
+        assert "GET rest/v1/itemtypes/4711" in fake.routes()
+
+    async def test_run_level_field_name_comes_from_the_item_type(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        """An instance whose field carries a ``$<typeId>`` suffix."""
+        for definition in fake.item_types[-1]["fields"]:
+            if definition["name"] == "actualResults":
+                definition["name"] = "actualResults$89"
+        fields = fields_of(fake)
+        fields["actualResults$89"] = fields.pop("actualResults")
+        fake.result_fields = ("actualResults$89", "assignedTo")
+        runs = make_runs(fake, tmp_path)
+
+        update = await runs.append_to_actual_results(RUN, "<p>more</p>")
+
+        assert update.field_name == "actualResults$89"
+        sent = fake.run_puts[0]["fields"]
+        assert sent["actualResults$89"].endswith("<p>more</p>")
+        assert "actualResults" not in sent
+
+    async def test_read_only_run_level_field_fails_before_any_write(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        for definition in fake.item_types[-1]["fields"]:
+            if definition["name"] == "actualResults":
+                definition["readOnly"] = True
+        runs = make_runs(fake, tmp_path)
+
+        with pytest.raises(TestRunError, match="read-only on this Jama instance"):
+            await runs.append_to_actual_results(RUN, "<p>x</p>")
+        assert fake.run_puts == []
+        assert fake.count("GET", f"rest/v1/testruns/{RUN}") == 0
+
+    async def test_instance_without_a_test_run_type_or_field_is_a_clear_error(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJamaAttachments()
+        fake.item_types[-1]["typeKey"] = "OTHER"
+        with pytest.raises(TestRunError, match="typeKey 'TSTRN'"):
+            await make_runs(fake, tmp_path).append_to_actual_results(RUN, "<p>x</p>")
+
+        fake = FakeJamaAttachments()
+        fake.item_types[-1]["fields"] = [
+            f for f in fake.item_types[-1]["fields"] if f["name"] != "actualResults"
+        ]
+        with pytest.raises(TestRunError, match="has no 'actualResults' field"):
+            await make_runs(fake, tmp_path).append_to_actual_results(RUN, "<p>x</p>")
+        assert fake.run_puts == []
+
+    async def test_definition_is_fetched_once_per_connection(
+        self, fake: FakeJamaAttachments, tmp_path: Path
+    ) -> None:
+        runs = make_runs(fake, tmp_path)
+
+        await runs.append_to_actual_results(RUN, "<p>a</p>")
+        await runs.append_to_actual_results(RUN, "<p>b</p>", step=1)
+        await runs.update_test_run(RUN, step=3, step_fields={"status": "PASSED"})
+
+        assert fake.count("GET", "rest/v1/itemtypes") == 1
+        assert fake.count("GET", "rest/v1/itemtypes/89") == 1
+
+    def test_schema_from_a_definition(self) -> None:
+        schema = TestRunSchema.from_item_type(test_run_item_type())
+
+        assert schema.put_fields == ("testRunSteps", "actualResults", "assignedTo")
+        assert schema.resolve("defects_found") == "defects_found$89"
+        assert schema.resolve("unknown") == "unknown"
+
+
+# ---------------------------------------------------------------------------
 # attach_screenshots_to_test_run
 # ---------------------------------------------------------------------------
 
@@ -272,7 +472,7 @@ class TestAttachScreenshots:
 
         url = f"{fake.base}/attachment/9000/shot.png"
         steps = steps_of(fake)
-        assert steps[1]["actualResults"] == (
+        assert steps[1]["result"] == (
             "<p>Error 500</p>" f'<p>After login</p><p><img src="{url}" alt="After login" /></p>'
         )
         assert steps[0] == original["testRunSteps"][0]
@@ -282,10 +482,14 @@ class TestAttachScreenshots:
         assert result.embedded == [url]
         assert result.attachments[0].attachment_id == 500
         assert result.attachments[0].file_id == 9000
-        # Created in the run's project and linked to the run.
+        # Created in the run's project. A test run is not an item: no link is
+        # attempted, and that is reported as info, not as a warning.
         assert fake.attachments[500]["project"] == 3
-        assert fake.links == {RUN: [500]}
+        assert fake.links == {}
+        assert fake.count("POST", f"rest/v1/items/{RUN}/attachments") == 0
+        assert fake.count("GET", f"rest/v1/items/{RUN}") == 0
         assert result.warnings == []
+        assert any("no Attachments tab via REST" in note for note in result.info)
 
     async def test_run_level_without_caption_uses_file_name_as_alt(
         self, fake: FakeJamaAttachments, original: dict[str, Any], tmp_path: Path, png: Path
@@ -312,7 +516,7 @@ class TestAttachScreenshots:
 
         assert len(result.embedded) == 2
         assert len(fake.run_puts) == 2  # one PUT per call, not per image
-        assert steps_of(fake)[0]["actualResults"].count("<img ") == 3
+        assert steps_of(fake)[0]["result"].count("<img ") == 3
 
     async def test_rerun_creates_no_duplicate(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
@@ -329,11 +533,11 @@ class TestAttachScreenshots:
 
         assert len(fake.attachments) == 1
         assert fields_of(fake) == after_first
-        assert steps_of(fake)[1]["actualResults"].count("<img ") == 1
+        assert steps_of(fake)[1]["result"].count("<img ") == 1
         assert len(fake.run_puts) == 1
         assert second.updated is False
         assert second.skipped == first.embedded
-        assert fake.links == {RUN: [500]}
+        assert fake.links == {}
 
     async def test_same_file_twice_in_one_call_is_embedded_once(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
@@ -343,23 +547,7 @@ class TestAttachScreenshots:
         await runs.attach_screenshots_to_test_run(RUN, [png, png], step=1)
 
         assert len(fake.attachments) == 1
-        assert steps_of(fake)[0]["actualResults"].count("<img ") == 1
-
-    async def test_link_refused_still_embeds_and_warns(
-        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
-    ) -> None:
-        fake.refuse_link_for = {RUN}
-        runs = make_runs(fake, tmp_path)
-
-        result = await runs.attach_screenshots_to_test_run(RUN, [png], step=1)
-
-        assert f"{fake.base}/attachment/9000/shot.png" in steps_of(fake)[0]["actualResults"]
-        assert result.updated is True
-        assert result.attachments[0].linked is False
-        assert fake.links == {}
-        assert len(result.warnings) == 1
-        assert "Attachments tab" in result.warnings[0]
-        assert "not allowed for this item type" in result.warnings[0]
+        assert steps_of(fake)[0]["result"].count("<img ") == 1
 
     async def test_caption_and_alt_are_escaped(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
@@ -369,7 +557,7 @@ class TestAttachScreenshots:
 
         await runs.attach_screenshots_to_test_run(RUN, [png], step=3, caption=caption)
 
-        stored = steps_of(fake)[2]["actualResults"]
+        stored = steps_of(fake)[2]["result"]
         assert "<script>" not in stored
         assert "<p>&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; co</p>" in stored
         assert 'alt="&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; co"' in stored
@@ -412,7 +600,7 @@ class TestAttachScreenshots:
 
         assert fake.internal_uploads[0]["parts"]["itemId"]["content"] == b"77"
         assert result.attachments[0].via_internal_endpoint is True
-        assert result.attachments[0].embed_url in steps_of(fake)[0]["actualResults"]
+        assert result.attachments[0].embed_url in steps_of(fake)[0]["result"]
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +694,6 @@ class TestJamaClientTestRuns:
         assert shots["attachments"][0]["file_id"] == 9000
         assert updated["updated_steps"] == [3]
         steps = steps_of(fake)
-        assert steps[0]["actualResults"].startswith("<p>Loaded in <b>1s</b></p><p>x</p><p>c</p>")
+        assert steps[0]["result"].startswith("<p>Loaded in <b>1s</b></p><p>x</p><p>c</p>")
         assert steps[1] == original["testRunSteps"][1]
         assert steps[2]["status"] == "BLOCKED"

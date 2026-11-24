@@ -34,6 +34,8 @@ def _target(test_run_id: int, step: int | None) -> str:
 def _report(ctx: typer.Context, json_flag: bool, result: dict[str, Any], message: str) -> None:
     for warning in result.get("warnings", []):
         print_warning(warning)
+    for note in result.get("info", []):
+        print_info(note)
     if _wants_json(ctx, json_flag):
         typer.echo(json.dumps(result, indent=2))
     elif result.get("updated"):
@@ -162,8 +164,10 @@ def set_actual(
 ) -> None:
     """Write the actual results of a test run or of one of its steps.
 
-    Appends to the existing content unless --replace is given. Other steps,
-    their statuses and all other fields stay as they are.
+    Without --step this is the run-level "Actual results" field; with --step N
+    it is the "Result" column of that step. Appends to the existing content
+    unless --replace is given. Other steps, their statuses and all other fields
+    stay as they are.
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -27,6 +27,8 @@ from jama_cli.core.exceptions import CoreException, UnauthorizedException
 from jama_cli.core.session_store import (
     CSRF_COOKIE,
     SESSION_COOKIE,
+    SOURCE_BROWSER_PREFIX,
+    SOURCE_FORM,
     SessionStore,
     StoredSession,
     default_session_dir,
@@ -60,7 +62,7 @@ class SessionSettings:
     session_file: Path | None = None
     keepalive_minutes: float = 0.0
     # Reuse the session from the user's own browser instead of logging in again.
-    # None | "firefox" | "chrome" | "edge" (also accepts a "browser-" prefix).
+    # None | "firefox" (also accepts a "browser-" prefix). Chrome/Edge are rejected.
     session_source: str | None = None
     browser_cookie_profile: str | None = None
     browser_cookies_path: Path | None = None
@@ -79,6 +81,20 @@ class SessionSettings:
         if self.browser_profile_dir:
             return self.browser_profile_dir
         return default_session_dir().parent / "browser-profile"
+
+
+@dataclass
+class LogoutResult:
+    """What a logout did. Truthy if there was a stored session."""
+
+    had_session: bool
+    # Where the removed session came from ("login", "form", "browser-firefox"), if any.
+    source: str | None = None
+    # Whether ``logout.req`` was called, i.e. the session was ended on the server.
+    server_session_ended: bool = False
+
+    def __bool__(self) -> bool:
+        return self.had_session
 
 
 @dataclass
@@ -282,7 +298,7 @@ async def form_login(
         cookies = _jar_to_cookies(client.cookies)
 
     now = time.time()
-    session = StoredSession(base_url=base, cookies=cookies, created_at=now)
+    session = StoredSession(base_url=base, cookies=cookies, created_at=now, source=SOURCE_FORM)
     session.csrf_token = session.cookie_value(CSRF_COOKIE) or ""
 
     # 4. Cookies prove nothing: only the authenticated probe counts.
@@ -342,6 +358,7 @@ async def browser_cookie_login(
         )
     session.username = result.username
     session.last_validated_at = time.time()
+    session.source = SOURCE_BROWSER_PREFIX + browser
     logger.info(f"Reused the Jama session from {browser}")
     return session
 
@@ -515,11 +532,30 @@ class SessionManager:
                     return stored
 
             logger.info("Jama session missing or expired, logging in")
-            session = await self._login_func(self.settings, mode)
+            session = await self._login_func(self._recovery_settings(dead, stored), mode)
             self.store.save(session)
             self._session, self._loaded = session, True
             logger.info(f"Logged in to Jama as {session.username or 'unknown user'}")
             return session
+
+    def _recovery_settings(
+        self, dead: StoredSession | None, stored: StoredSession | None
+    ) -> SessionSettings:
+        """Settings for replacing a dead session: the way it was obtained wins.
+
+        A session that was taken over from the user's browser is replaced by
+        reading the browser again, even in a process whose own configuration
+        has no ``session_source`` (for example an MCP server started without
+        ``JAMA_SESSION_SOURCE``). Logging in here instead would open a second
+        Jama session and could sign the user out in the browser.
+        """
+        if self.settings.session_source:
+            return self.settings
+        for candidate in (stored, dead):
+            if candidate is not None and candidate.from_browser:
+                logger.debug("The dead session came from the browser; reading it again there")
+                return replace(self.settings, session_source=candidate.source)
+        return self.settings
 
     async def login(self, interactive: str = "auto", force: bool = False) -> StoredSession:
         """Explicit login (``jama login``). Reuses a still-valid session unless forced."""
@@ -538,20 +574,36 @@ class SessionManager:
             self._session, self._loaded = session, True
             return session
 
-    async def logout(self) -> bool:
-        """End the session on the server and delete the store entry.
+    async def logout(self, end_server_session: bool | None = None) -> LogoutResult:
+        """Delete the store entry and, where appropriate, end the session on the server.
 
-        Returns True if there was a stored session.
+        A session this tool logged in itself (``login`` / ``form``) is ended on
+        the server, which releases the license seat. A session taken over from
+        the user's browser *is* the browser's session: ending it would sign the
+        user out there too, so by default only the local entry is removed.
+
+        ``end_server_session`` overrides the default: True always calls
+        ``logout.req``, False never does.
         """
         async with self._recover_lock, self.store.locked(self._lock_timeout):
             stored = self.store.load()
+            if stored is None:
+                self.store.delete()
+                self._session, self._loaded = None, True
+                return LogoutResult(had_session=False)
+
+            end_on_server = (
+                not stored.from_browser if end_server_session is None else end_server_session
+            )
             try:
-                if stored is not None:
+                if end_on_server:
                     await end_session(self.settings.base_url, stored, self._transport)
             finally:
                 self.store.delete()
                 self._session, self._loaded = None, True
-            return stored is not None
+            return LogoutResult(
+                had_session=True, source=stored.source, server_session_ended=end_on_server
+            )
 
     async def status(self) -> dict[str, Any]:
         """Non-secret description of the stored session, including a live probe."""
@@ -564,6 +616,7 @@ class SessionManager:
             "last_validated_at": None,
             "age_seconds": None,
             "valid": False,
+            "source": None,
         }
         if stored is None:
             return info
@@ -586,6 +639,7 @@ class SessionManager:
             last_validated_at=stored.last_validated_at,
             age_seconds=max(0.0, time.time() - stored.created_at),
             valid=result.ok,
+            source=stored.source,
         )
         return info
 

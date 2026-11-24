@@ -14,6 +14,7 @@ import re
 import signal
 import time
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
@@ -21,7 +22,10 @@ from aiohttp_swagger3 import SwaggerDocs, SwaggerUiSettings
 from loguru import logger
 from py_jama_rest_client.client import JamaClient
 
+from jama_cli.core.api import JamaApi
+from jama_cli.core.http_client import JamaHttpClient
 from jama_mcp_server import __version__
+from jama_mcp_server.core import attachment_tools
 from jama_mcp_server.models import (
     BatchRequest,
     BatchResponse,
@@ -58,6 +62,8 @@ class JamaMCPServer:
         host: str = "localhost",
         port: int = 8000,
         api_key: str | None = None,
+        allow_local_paths: bool = False,
+        local_path_dir: str | Path | None = None,
     ) -> None:
         """
         Initialize the Jama MCP server.
@@ -67,11 +73,19 @@ class JamaMCPServer:
             host: The host to bind the MCP server to
             port: The port to listen on
             api_key: Optional API key for server authentication (if set, requires Bearer token)
+            allow_local_paths: Let the attachment tools read and write files on this
+                machine by path. Off by default: over HTTP files are sent as base64
+            local_path_dir: The one directory such paths are confined to (required
+                when ``allow_local_paths`` is set)
         """
         self.config = config
         self.host = host
         self.port = port
         self.api_key = api_key
+        self.file_policy = attachment_tools.FileAccessPolicy.http(allow_local_paths, local_path_dir)
+        # Shared attachment / test run tools (same registry as the stdio server).
+        self._shared_http: JamaHttpClient | None = None
+        self._shared_tools: attachment_tools.AttachmentTools | None = None
         self.jama_client: JamaClient | None = None
         self._running = False
         self._start_time: float | None = None
@@ -94,6 +108,7 @@ class JamaMCPServer:
             [
                 web.post("/v1/invoke", self._handle_invoke),
                 web.post("/v1/batch", self._handle_batch),
+                web.get("/v1/tools", self._handle_tools),
                 web.get("/v1/sse", self._handle_sse),
                 web.post("/v1/messages", self._handle_sse_message),
                 web.get("/health", self._handle_health),
@@ -378,6 +393,10 @@ All API endpoints are relative to the server base URL (default: http://localhost
 
         self._running = False
         self.jama_client = None
+        if self._shared_http is not None:
+            await self._shared_http.close()
+            self._shared_http = None
+            self._shared_tools = None
 
         logger.info("Jama MCP server stopped")
 
@@ -558,6 +577,11 @@ All API endpoints are relative to the server base URL (default: http://localhost
         Raises:
             ValueError: If required parameters are missing
         """
+        # Attachments and test run results: the registry shared with the stdio server.
+        if intent in attachment_tools.TOOL_NAMES:
+            arguments = {key: value for key, value in params.items() if key != "intent"}
+            return await self._shared_tool_handlers().call(intent, arguments)
+
         # Use asyncio.to_thread for blocking operations (Python 3.9+)
         loop = asyncio.get_event_loop()
 
@@ -1224,6 +1248,24 @@ All API endpoints are relative to the server base URL (default: http://localhost
             return web.json_response(
                 ErrorResponse(error=str(e), error_code="SSE_MESSAGE_ERROR").model_dump(), status=500
             )
+
+    @staticmethod
+    def shared_tools() -> list[dict[str, Any]]:
+        """The attachment / test run tools, exactly as the stdio server lists them."""
+        return attachment_tools.tool_listing()
+
+    def _shared_tool_handlers(self) -> attachment_tools.AttachmentTools:
+        """Handlers of the shared tools, on an async Jama client created on first use."""
+        if self._shared_tools is None:
+            self._shared_http = attachment_tools.http_client_for(self.config)
+            self._shared_tools = attachment_tools.AttachmentTools.for_api(
+                JamaApi(self._shared_http), files=self.file_policy
+            )
+        return self._shared_tools
+
+    async def _handle_tools(self, _request: web.Request) -> web.Response:
+        """List the shared tools; call one with POST /v1/invoke and parameters.intent."""
+        return web.json_response({"tools": self.shared_tools()})
 
     async def _handle_invoke(self, request: web.Request) -> web.Response:
         """Handle an invoke request."""

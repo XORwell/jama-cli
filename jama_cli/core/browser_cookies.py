@@ -1,11 +1,11 @@
-"""Reuse the Jama web session the user's own browser already holds.
+"""Reuse the Jama web session the user's own Firefox already holds.
 
 ``auth_type: session`` normally logs in through its own Playwright profile, which
 is a *second* session. On an instance that allows only one session per account,
 that second login evicts the user's real browser session (and vice versa), so the
 user and the MCP server cannot work at the same time. This module avoids that: it
-reads the two Jama cookies the browser already has and reuses them, so browser,
-CLI and MCP server share one session.
+reads the two Jama cookies Firefox already has and reuses them, so browser, CLI
+and MCP server share one session.
 
 Only the two cookies ``JSESSIONID`` and ``jama-csrf-token``, and only for the
 configured Jama host, are ever read. Their values are never logged or put into an
@@ -14,13 +14,15 @@ exception message.
 Runtime target: CLI/MCP under Linux (WSL2), browser on the Windows host. The
 Windows file tree is reachable from WSL under ``/mnt/c/...``.
 
-- **Firefox** keeps cookie values in clear text (``cookies.sqlite`` →
-  ``moz_cookies``); everything happens inside WSL, no Windows component.
-- **Chrome/Edge** encrypt the values and, since Chrome/Edge 127, bind the key to
-  the Windows user (App-Bound Encryption). The key can only be unwrapped *as that
-  user on Windows*, so a small Windows helper does the decryption and returns only
-  the two needed values. If it cannot (policy, AV, unsupported version), a clear
-  error is raised and the caller must not silently fall back to a fresh login.
+Only **Firefox** is supported. It keeps cookie values in clear text
+(``cookies.sqlite`` → ``moz_cookies``), so everything happens by reading a file;
+no Windows component, no decryption.
+
+Chrome and Edge are deliberately **not** supported. Since version 127 they bind
+the cookie key to the Windows user (App-Bound Encryption), and unwrapping it from
+outside the browser is exactly what credential-stealing malware does. A tool that
+did so would be flagged by endpoint security on a managed machine, so asking for
+Chrome/Edge fails fast with a clear message instead.
 
 The locked live cookie database is never opened in place: it is copied (together
 with its ``-wal``/``-shm`` sidecars) to a temporary file, opened read-only, and
@@ -30,14 +32,12 @@ the copy is deleted afterwards.
 from __future__ import annotations
 
 import configparser
-import json
 import os
 import shutil
 import sqlite3
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -52,33 +52,27 @@ _WANTED = (SESSION_COOKIE, CSRF_COOKIE)
 
 # Browser sources, as used in ``session_source`` and ``jama login --from-browser``.
 FIREFOX = "firefox"
-CHROME = "chrome"
-EDGE = "edge"
-BROWSERS = (FIREFOX, CHROME, EDGE)
+BROWSERS = (FIREFOX,)
 
-# The PowerShell helper is fed on stdin, so no Windows path translation is needed.
-# It receives base64 blobs on stdin as JSON and prints the decrypted values as
-# JSON. It never touches the filesystem and never prints the key.
-_WIN_HELPER = "jama_read_chrome_cookies.ps1"
+# Chromium-family names people will try; they get a specific explanation.
+_CHROMIUM_NAMES = ("chrome", "edge", "msedge", "chromium", "brave")
+
+CHROMIUM_UNSUPPORTED = (
+    "Reading Chrome/Edge cookies is not supported (App-Bound Encryption). "
+    "Use --from-browser firefox, or `jama login`."
+)
 
 
 class BrowserCookieError(CoreException):
     """The Jama session could not be read from the browser's cookie store."""
 
 
-@dataclass
-class ChromiumPaths:
-    """Where a Chromium-family browser keeps its cookies and its key."""
-
-    cookies_db: Path
-    local_state: Path
-
-
 def normalise_source(value: str | None) -> str | None:
     """Map a ``session_source`` value to a browser name, or None for the default.
 
-    Accepts ``browser-firefox`` / ``firefox`` (and chrome/edge); ``login`` or an
-    empty value means "log in as before".
+    Accepts ``firefox`` / ``browser-firefox``; ``login`` or an empty value means
+    "log in as before". Chrome and Edge are rejected with an explanation, and
+    there is no fallback to a fresh login.
     """
     if not value:
         return None
@@ -86,9 +80,12 @@ def normalise_source(value: str | None) -> str | None:
     name = name[len("browser-") :] if name.startswith("browser-") else name
     if name in ("", "login", "playwright"):
         return None
+    if name in _CHROMIUM_NAMES:
+        raise BrowserCookieError(CHROMIUM_UNSUPPORTED)
     if name not in BROWSERS:
         raise BrowserCookieError(
-            f"Unknown browser source '{value}'. Use one of: {', '.join(BROWSERS)}."
+            f"Unknown browser source '{value}'. Only 'firefox' is supported "
+            "(or leave it unset to log in with `jama login`)."
         )
     return name
 
@@ -219,7 +216,7 @@ def firefox_profiles_dir(override_home: Path | None = None) -> Path:
         if home is None:
             raise BrowserCookieError(
                 "Could not locate the Windows user profile from WSL. Pass the cookies path "
-                "explicitly (session_cookies_path / --browser-cookies-path)."
+                "explicitly (browser_cookies_path / --browser-cookies-path)."
             )
         return home / "AppData/Roaming/Mozilla/Firefox"
     return Path.home() / ".mozilla/firefox"
@@ -292,148 +289,6 @@ def read_firefox(base_url: str, cookies_db: Path) -> StoredSession:
 
 
 # ---------------------------------------------------------------------------
-# Chrome / Edge (encrypted; decryption runs as the user on Windows)
-# ---------------------------------------------------------------------------
-
-
-def chromium_paths(
-    browser: str, profile: str | None, override_home: Path | None = None
-) -> ChromiumPaths:
-    """Locate a Chromium-family browser's Cookies db and Local State file."""
-    vendor = {
-        CHROME: "Google/Chrome",
-        EDGE: "Microsoft/Edge",
-    }[browser]
-    if override_home is not None:
-        user_data = override_home
-    elif in_wsl():
-        home = windows_user_home()
-        if home is None:
-            raise BrowserCookieError(
-                "Could not locate the Windows user profile from WSL. Pass the cookies path "
-                "explicitly (session_cookies_path / --browser-cookies-path)."
-            )
-        user_data = home / f"AppData/Local/{vendor}/User Data"
-    else:
-        user_data = Path.home() / f".config/{vendor.split('/')[-1].lower()}"
-
-    profile_dir = user_data / (profile or "Default")
-    cookies = profile_dir / "Network" / "Cookies"
-    if not cookies.exists():  # older layout without the Network subfolder
-        cookies = profile_dir / "Cookies"
-    return ChromiumPaths(cookies_db=cookies, local_state=user_data / "Local State")
-
-
-def _chromium_encrypted_values(base_url: str, cookies_db: Path) -> dict[str, bytes]:
-    """Read the still-encrypted Jama cookie blobs from a Chromium Cookies db."""
-    host = _jama_host(base_url)
-    tmp_dir, copy = _copy_locked_db(cookies_db)
-    try:
-        rows = _read_rows(copy, "SELECT name, encrypted_value, host_key FROM cookies")
-    finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    blobs: dict[str, bytes] = {}
-    for name, encrypted, cookie_host in rows:
-        if name in _WANTED and host_matches(cookie_host or "", host):
-            blobs[name] = bytes(encrypted) if encrypted is not None else b""
-    return blobs
-
-
-def _encrypted_key(local_state: Path) -> str:
-    """The base64 ``os_crypt.encrypted_key`` from a Chromium Local State file."""
-    try:
-        data = json.loads(local_state.read_text(encoding="utf-8"))
-        return str(data["os_crypt"]["encrypted_key"])
-    except (OSError, ValueError, KeyError, TypeError) as e:
-        raise BrowserCookieError(
-            f"Could not read the browser's encryption key from {local_state.name} "
-            f"({type(e).__name__})."
-        ) from e
-
-
-def _run_windows_helper(payload: dict[str, object]) -> str:
-    """Pipe the decryption request to the PowerShell helper and return its stdout.
-
-    The helper runs on Windows *as the user*, decrypts with the OS's own key
-    material (DPAPI / App-Bound), and prints only the requested values as JSON.
-    The script is fed on stdin, so no Windows path has to be translated.
-    """
-    helper = Path(__file__).with_name(_WIN_HELPER)
-    script = helper.read_text(encoding="utf-8")
-    try:
-        completed = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                "-",
-            ],
-            input=script + "\n" + json.dumps(payload) + "\n",
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd="/mnt/c",
-        )
-    except FileNotFoundError as e:
-        raise BrowserCookieError(
-            "powershell.exe is not reachable from this environment. Reading Chrome/Edge cookies "
-            "needs the Windows host (WSL). Use --from-browser firefox, or `jama login`."
-        ) from e
-    except (OSError, subprocess.SubprocessError) as e:
-        raise BrowserCookieError(
-            f"The Windows cookie helper could not be started ({type(e).__name__})."
-        ) from e
-    if completed.returncode != 0:
-        detail = (completed.stderr or "").strip().splitlines()
-        hint = detail[-1] if detail else f"exit code {completed.returncode}"
-        raise BrowserCookieError(
-            "The Windows cookie helper could not decrypt the browser cookies "
-            f"({hint}). This usually means App-Bound Encryption (Chrome/Edge >= 127) could not "
-            "be unwrapped here. Use --from-browser firefox, or `jama login`."
-        )
-    return completed.stdout
-
-
-def read_chromium(
-    base_url: str,
-    paths: ChromiumPaths,
-    helper_runner: object | None = None,
-) -> StoredSession:
-    """Read the Jama session from a Chromium-family browser via the Windows helper.
-
-    ``helper_runner`` (tests) is a callable ``(payload_dict) -> stdout_str`` that
-    stands in for the real PowerShell helper.
-    """
-    blobs = _chromium_encrypted_values(base_url, paths.cookies_db)
-    missing = [name for name in _WANTED if name not in blobs]
-    if missing:
-        raise BrowserCookieError(
-            "The browser has no current Jama session for this host "
-            f"(missing cookie: {', '.join(missing)}). Sign in to Jama in the browser first."
-        )
-    import base64
-
-    payload = {
-        "encrypted_key": _encrypted_key(paths.local_state),
-        "cookies": {name: base64.b64encode(blob).decode() for name, blob in blobs.items()},
-    }
-    runner = helper_runner or _run_windows_helper
-    raw = runner(payload)  # type: ignore[operator]
-    try:
-        decrypted = json.loads(raw)
-        values = {name: str(decrypted[name]) for name in _WANTED}
-    except (ValueError, KeyError, TypeError) as e:
-        raise BrowserCookieError(
-            f"The Windows cookie helper returned no usable result ({type(e).__name__})."
-        ) from e
-    return _build_session(base_url, values)
-
-
-# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -443,25 +298,23 @@ def read_browser_session(
     browser: str,
     profile: str | None = None,
     cookies_path: Path | None = None,
-    helper_runner: object | None = None,
 ) -> StoredSession:
-    """Read the current Jama web session from the user's browser.
+    """Read the current Jama web session from the user's Firefox.
 
-    ``cookies_path`` overrides auto-detection: for Firefox the path to a
-    ``cookies.sqlite`` (or its profile directory), for Chrome/Edge the path to a
-    ``User Data`` directory.
+    ``cookies_path`` overrides auto-detection: the path to a ``cookies.sqlite``,
+    or to the Firefox directory that holds ``profiles.ini``.
     """
-    if browser not in BROWSERS:
-        raise BrowserCookieError(f"Unknown browser '{browser}'. Use one of: {', '.join(BROWSERS)}.")
-    logger.debug(f"Reading the Jama session from {browser}")
+    # Validates the name; Chrome/Edge and unknown names raise here.
+    name = normalise_source(browser)
+    if name != FIREFOX:
+        raise BrowserCookieError(
+            "No browser source given. Use --from-browser firefox, or `jama login`."
+        )
+    logger.debug("Reading the Jama session from Firefox")
 
-    if browser == FIREFOX:
-        if cookies_path and cookies_path.is_file():
-            db = cookies_path
-        else:
-            root = firefox_profiles_dir(cookies_path if cookies_path else None)
-            db = _find_firefox_cookie_db(root, profile)
-        return read_firefox(base_url, db)
-
-    paths = chromium_paths(browser, profile, override_home=cookies_path)
-    return read_chromium(base_url, paths, helper_runner=helper_runner)
+    if cookies_path and cookies_path.is_file():
+        db = cookies_path
+    else:
+        root = firefox_profiles_dir(cookies_path if cookies_path else None)
+        db = _find_firefox_cookie_db(root, profile)
+    return read_firefox(base_url, db)

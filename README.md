@@ -145,6 +145,7 @@ or with environment variables: `JAMA_URL=... JAMA_AUTH_TYPE=session`.
 jama login      # Log in and store the session
 jama status     # Base URL, user, age, last validation, and whether the session is valid right now
 jama logout     # Log out on the server (releases the license seat) and delete the stored session
+                # (a session taken over with --from-browser is only removed locally, see below)
 ```
 
 `jama login` options: `--mode browser|form`, `--browser-channel`, `--browser-profile-dir`,
@@ -167,34 +168,42 @@ By default `login` opens its own browser profile, which is a **second** Jama ses
 instance allows only one session per account, that second login and your real browser session
 evict each other, so you cannot browse and use the CLI/MCP server at the same time.
 
-`--from-browser` avoids that: it reads the Jama session cookies your browser already has and
+`--from-browser` avoids that: it reads the Jama session cookies Firefox already has and
 reuses them, so browser, CLI and MCP server share **one** session. No second login, nothing is
 evicted.
 
 ```bash
 jama login --from-browser firefox     # read the session from Firefox
-jama login --from-browser chrome      # Chrome
-jama login --from-browser edge        # Edge
-# optional: a non-default browser profile, or an explicit cookie-store path
-jama login --from-browser firefox --browser-cookie-profile "default-release"
-jama login --from-browser chrome --browser-cookies-path "/mnt/c/Users/me/AppData/Local/Google/Chrome/User Data"
+# optional: a non-default Firefox profile, or an explicit cookie-store path
+jama login --from-browser firefox --browser-cookie-profile "abcd1234.default-release"
+jama login --from-browser firefox --browser-cookies-path "/mnt/c/Users/me/AppData/Roaming/Mozilla/Firefox"
 ```
 
-Set it permanently with `session_source: firefox|chrome|edge` (env `JAMA_SESSION_SOURCE`). It is
-non-interactive, so it works with `login_interactive: never`. Sign in to Jama in the browser
-first; if you sign out there, the shared session ends for the CLI too (that coupling is the point).
+`--from-browser` applies to that one call. The stored session remembers that it came from
+Firefox, so when it later ends, every process using it (other terminals, the MCP server)
+reads Firefox again instead of logging in on its own, whatever its own settings say. To
+make *every* login go through Firefox, including the first one and after `jama logout`, set
+`session_source: firefox` in the profile or `JAMA_SESSION_SOURCE=firefox` in the
+environment, also in the `env` block of the MCP server. Reading the browser is
+non-interactive, so it works with `login_interactive: never`. Sign in to Jama in Firefox first; if
+you sign out there, the shared session ends for the CLI too (that coupling is the point).
 
-**Runtime target — CLI in WSL, browser on Windows.** The Windows cookie stores are read from
+**Runtime target: CLI in WSL, browser on Windows.** The Firefox cookie store is read from
 `/mnt/c/Users/<windows-user>/...` (the Windows user name is asked of Windows, not guessed). Only
-the two Jama cookies, and only for your configured host, are ever read; copied database files are
-deleted right after reading.
+the two Jama cookies, and only for your configured host, are ever read; the copied database file
+is deleted right after reading. Firefox keeps cookie values in clear text, so this is a plain
+file read inside WSL with no Windows component.
 
-- **Firefox** keeps cookie values in clear text, so this works entirely inside WSL.
-- **Chrome / Edge** encrypt the values and, since version 127, bind the key to the Windows user
-  (App-Bound Encryption). Decryption therefore runs **as you, on Windows**, through a bundled
-  PowerShell helper that returns only the two values. If it cannot decrypt (App-Bound v20, group
-  policy, or AV), the CLI says so and stops — it does **not** silently fall back to a fresh login
-  (which would evict your browser). Use `--from-browser firefox` or plain `jama login` instead.
+**Logout.** A session taken over from Firefox *is* your browser's session. `jama logout` therefore
+only removes the stored copy and tells you so ("Removed the stored session; your browser session
+is still active"). `jama logout --end-server-session` really ends it on the server, which also
+signs you out in the browser. `jama status` shows where the stored session came from (`source`).
+
+**Only Firefox is supported.** Chrome and Edge (version 127 and later) bind the cookie key to
+the Windows user with App-Bound Encryption. Getting around that from outside the browser is what
+credential-stealing malware does, and endpoint security treats it that way, so this tool does not
+attempt it. `--from-browser chrome` or `edge` stops with an error and does **not** fall back to a
+fresh login (which would evict your browser session). Use Firefox, or plain `jama login`.
 
 > Reading another application's browser cookies may be restricted by your company policy or
 > flagged by endpoint security. And, as with any session reuse, confirm with your Jama admin that
@@ -227,9 +236,9 @@ Environment variables override the profile.
 | `browser_channel` | `JAMA_BROWSER_CHANNEL` | bundled Chromium | `chrome`, `msedge`, ... |
 | `browser_profile_dir` | `JAMA_BROWSER_PROFILE_DIR` | `~/.jama/browser-profile` | Persistent browser profile |
 | `sso_selectors` | `JAMA_SSO_SELECTORS` | `#loginWithSSOButton`, `input[name="submitWithSSO"]` | CSS selectors of the SSO button (list; comma-separated in the env var) |
-| `session_source` | `JAMA_SESSION_SOURCE` | off (log in) | Reuse the browser's session: `firefox`, `chrome` or `edge` |
+| `session_source` | `JAMA_SESSION_SOURCE` | off (log in) | Reuse the browser's session: `firefox` |
 | `browser_cookie_profile` | `JAMA_BROWSER_COOKIE_PROFILE` | main profile | Browser profile to read cookies from |
-| `browser_cookies_path` | `JAMA_BROWSER_COOKIES_PATH` | auto-detected | Override path to the cookie store / `User Data` dir |
+| `browser_cookies_path` | `JAMA_BROWSER_COOKIES_PATH` | auto-detected | Path to Firefox's `cookies.sqlite` or the directory with `profiles.ini` |
 | `session_file` | `JAMA_SESSION_FILE` | `~/.jama/sessions/<hash>.json` | Session store file |
 | `login_debug_dir` | `JAMA_LOGIN_DEBUG_DIR` | off | Screenshots of each login step |
 | `session_keepalive_minutes` | `JAMA_SESSION_KEEPALIVE_MINUTES` | `0` (off) | MCP server only: one cheap request every N minutes |
@@ -246,7 +255,8 @@ Environment variables override the profile.
 
 `jama serve --stdio` supports session auth (the HTTP server mode does not). Two extra tools are
 available: `get_session_status` (never returns cookies or tokens) and `logout_session` (releases
-the seat). All logs go to stderr; stdout carries only the MCP protocol.
+the seat; for a session taken over from the browser it only removes the stored copy unless
+`end_server_session` is true). All logs go to stderr; stdout carries only the MCP protocol.
 
 ```json
 {
@@ -443,14 +453,19 @@ jama testruns set-actual 1234 --file result.html --step 3
 jama testruns set-actual 1234 --html "<p>Retested</p>" --step 3 --replace
 ```
 
+Without `--step` the run-level "Actual results" field is written; with `--step N` the
+"Result" column of that step (the step key `result` in the REST API). Field names are read
+from the instance's test run item type.
+
 These commands change a test run with a read-modify-write: the run is read, only
 the targeted field is changed, the complete step list is sent back, and the run is
 read again to check that the other steps, their statuses and the existing HTML are
 unchanged. Existing content is appended to, never replaced, unless `--replace` is
 given. Running the same `add-screenshot` again neither uploads the file again nor
-adds a second image. If Jama does not allow an attachment to be linked to a test
-run, the image is still embedded and a warning says that it is missing from the
-Attachments tab. If the run cannot be edited (locked cycle, missing permission),
+adds a second image. Test runs are not items in Jama's REST API, so a screenshot is
+embedded by its URL but not linked to an Attachments tab; `jama attachments upload` accepts
+a test run id too (with `--project` if the project cannot be read from the run) and reports
+`Linked to test run <id>: no`. If the run cannot be edited (locked cycle, missing permission),
 Jama's error is shown and nothing is retried.
 
 The same functions are available in Python (`JamaClient.upload_attachment`,
@@ -502,6 +517,32 @@ jama serve --api-key secret            # With authentication
 curl http://localhost:8000/health
 open http://localhost:8000/api/docs    # Swagger UI
 ```
+
+The attachment and test run tools (`get_test_run`, `update_test_run`, `upload_attachment`,
+`attach_screenshot_to_test_run`, `download_attachment`) are the same in both server modes;
+they come from one shared registry. In HTTP mode, list them with `GET /v1/tools` and call
+one with `POST /v1/invoke`:
+
+```bash
+curl -s http://localhost:8000/v1/tools
+curl -s http://localhost:8000/v1/invoke -H 'Content-Type: application/json' -d '{
+  "prompt": "upload_attachment",
+  "parameters": {"intent": "upload_attachment", "item_id": 456,
+                 "file_name": "shot.png", "content_base64": "<base64>"}
+}'
+```
+
+Over HTTP, files are sent as `content_base64` + `file_name`, and a download without
+`output_path` comes back as base64. File paths on the server's machine (`file_path`,
+`file_paths`, `output_path`) are refused by default. To accept them, start the server with one
+directory they are confined to:
+
+```bash
+jama serve --allow-local-paths --local-path-dir /srv/jama-exchange
+# or: JAMA_MCP_ALLOW_LOCAL_PATHS=1 JAMA_MCP_LOCAL_PATH_DIR=/srv/jama-exchange jama serve
+```
+
+The stdio server runs on your own machine and accepts paths as before.
 
 ### Available Operations
 

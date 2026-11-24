@@ -8,16 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Reuse the session from the user's own browser instead of a second login:
-  `jama login --from-browser firefox|chrome|edge` (or `session_source` / `JAMA_SESSION_SOURCE`).
+- HTTP-mode MCP server: the attachment and test run tools (`get_test_run`,
+  `update_test_run`, `upload_attachment`, `attach_screenshot_to_test_run`,
+  `download_attachment`) are available there too, from the same registry the stdio server
+  uses. `GET /v1/tools` lists them; call one with `POST /v1/invoke` and
+  `parameters.intent`. Over HTTP files are sent as base64; file paths are refused unless
+  the server is started with `--allow-local-paths --local-path-dir DIR`
+  (`JAMA_MCP_ALLOW_LOCAL_PATHS`, `JAMA_MCP_LOCAL_PATH_DIR`) and are then confined to that
+  directory
+- Reuse the session from the user's own Firefox instead of a second login:
+  `jama login --from-browser firefox` (or `session_source` / `JAMA_SESSION_SOURCE`).
   Reads only the `JSESSIONID` and `jama-csrf-token` cookies for the configured host, so browser,
   CLI and MCP server share one session and do not evict each other on one-session instances.
-  Works in the "CLI in WSL, browser on Windows" setup: Firefox is read directly (clear text);
-  Chrome/Edge values are decrypted by a bundled PowerShell helper that runs as the user on
-  Windows. Non-interactive, so it also works with `login_interactive: never`; a truly dead
-  session is re-read from the browser rather than prompting. New settings
-  `browser_cookie_profile` and `browser_cookies_path`. Cookie values are never logged, and
-  copied cookie databases are deleted after reading
+  Works in the "CLI in WSL, browser on Windows" setup; Firefox stores cookie values in clear
+  text, so it is a plain file read. Non-interactive, so it also works with
+  `login_interactive: never`; a truly dead session is re-read from the browser rather than
+  prompting. New settings `browser_cookie_profile` and `browser_cookies_path`. Cookie values are
+  never logged, and the copied cookie database is deleted after reading. Chrome and Edge are not
+  supported (App-Bound Encryption) and fail with a clear message
 - Browser-session ("SSO cookie") auth mode, `auth_type: session` / `JAMA_AUTH_TYPE=session`:
   log in once in a real browser (or with the native login form) and work as yourself, with
   your own Jama permissions, without API credentials
@@ -66,6 +74,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- A session taken over with `jama login --from-browser firefox` is now also *renewed* from
+  Firefox in every process that shares it, even one without `session_source` configured
+  (for example an MCP server). Before, such a process logged in on its own once the session
+  ended, which opened a second session and could sign the user out in the browser
+- `jama attachments upload <testRunId> <file>` failed with 404: test runs are not items in
+  the REST API (`items/{id}` and `items/{id}/attachments` answer 404 for a test run id). The
+  project is now taken from the test run, or from the new `--project` option, and no link is
+  attempted for a test run; the result says `linked: false` with an info note instead of a
+  404 warning. `testruns add-screenshot` no longer tries to link either
+- `jama items list <project> --type <id>` printed an empty list for test plan, test cycle
+  and test run types, which Jama's item list never returns; it now fails with a hint
+- Test run results per step were written to the wrong key. Jama stores a step's actual
+  results under `result`; a step key `actualResults` is accepted and silently dropped, so
+  `testruns set-actual --step`, `testruns add-screenshot --step` and the MCP tools failed on
+  every freshly generated run ("did not store"). Steps are now written as `result`;
+  `actualResults` on a step is only read as a fallback, and `update_test_run` writes it as
+  `result` with a warning
+- Test run field names and writability are read from the instance's test run item type
+  (`typeKey` `TSTRN`) instead of constants, so fields with a `$<typeId>` suffix work, and a
+  field that Jama leaves out of a GET because it is empty is treated as empty
+- `update_test_run` now fails when Jama did not store a step value that was sent
+- `jama logout` and the MCP tool `logout_session` no longer sign the user out in the browser
+  when the session was taken over with `--from-browser`: only the stored copy is removed. New
+  flag `jama logout --end-server-session` and tool parameter `end_server_session` end it on the
+  server on purpose. The session file records where a session came from (`source`: `login`,
+  `form` or `browser-firefox`; files without the key count as `login`), and `jama status`
+  shows it. Sessions from `jama login` are ended on the server as before
 - Session auth: a wrong or missing CSRF token is repaired silently for every HTTP method.
   Jama checks the token on reads too and answers 401 "CSRF Exception"; this was taken for a
   dead session and led to an unnecessary login (or a failure with `login_interactive: never`)

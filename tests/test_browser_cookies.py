@@ -1,26 +1,25 @@
 """Tests for reusing the browser's Jama session (``jama login --from-browser``).
 
-Firefox is exercised against a real (temporary) ``cookies.sqlite``; Chrome/Edge
-against a mocked Windows helper, so neither test needs a browser or Windows.
+Firefox is exercised against a real (temporary) ``cookies.sqlite``, so no browser
+is needed. Chrome and Edge are not supported and must be refused.
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from jama_cli.core.browser_cookies import (
     BROWSERS,
+    CHROMIUM_UNSUPPORTED,
     BrowserCookieError,
-    ChromiumPaths,
     host_matches,
     normalise_source,
     read_browser_session,
-    read_chromium,
     read_firefox,
 )
 from jama_cli.core.session import SessionManager, SessionSettings, browser_cookie_login
@@ -54,23 +53,6 @@ def make_firefox_db(path: Path, cookies: list[tuple[str, str, str]]) -> None:
     conn.close()
 
 
-def make_chromium_db(path: Path, cookies: list[tuple[str, bytes, str]]) -> None:
-    """Write a minimal Chromium Cookies db with (name, encrypted_value, host) rows."""
-    path.unlink(missing_ok=True)
-    conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE cookies "
-        "(name TEXT, encrypted_value BLOB, host_key TEXT, path TEXT, is_secure INTEGER)"
-    )
-    conn.executemany(
-        "INSERT INTO cookies (name, encrypted_value, host_key, path, is_secure) "
-        "VALUES (?, ?, ?, '/', 1)",
-        cookies,
-    )
-    conn.commit()
-    conn.close()
-
-
 # ---------------------------------------------------------------------------
 # pure helpers
 # ---------------------------------------------------------------------------
@@ -79,8 +61,8 @@ def make_chromium_db(path: Path, cookies: list[tuple[str, bytes, str]]) -> None:
 class TestHelpers:
     def test_normalise_source(self) -> None:
         assert normalise_source("firefox") == "firefox"
-        assert normalise_source("browser-chrome") == "chrome"
-        assert normalise_source("EDGE") == "edge"
+        assert normalise_source("browser-firefox") == "firefox"
+        assert normalise_source("FireFox") == "firefox"
         assert normalise_source(None) is None
         assert normalise_source("login") is None
         assert normalise_source("") is None
@@ -149,71 +131,64 @@ class TestFirefox:
 
 
 # ---------------------------------------------------------------------------
-# Chrome / Edge (encrypted; helper mocked)
+# Chrome / Edge: refused, never a fallback to a fresh login
 # ---------------------------------------------------------------------------
 
 
-class TestChromium:
-    def _paths(self, tmp_path: Path) -> ChromiumPaths:
-        cookies_db = tmp_path / "Cookies"
-        make_chromium_db(
-            cookies_db,
-            [
-                ("JSESSIONID", b"v10enc-sid", HOST),
-                ("jama-csrf-token", b"v10enc-csrf", HOST),
-                ("other", b"v10enc-x", "other.com"),
-            ],
+class TestChromiumIsRefused:
+    @pytest.mark.parametrize(
+        "source", ["chrome", "edge", "browser-chrome", "browser-edge", "Chrome", "msedge"]
+    )
+    def test_source_is_rejected_with_the_explanation(self, source: str) -> None:
+        with pytest.raises(BrowserCookieError) as exc:
+            normalise_source(source)
+        assert str(exc.value) == CHROMIUM_UNSUPPORTED
+        assert "App-Bound Encryption" in str(exc.value)
+        assert "--from-browser firefox" in str(exc.value)
+
+    def test_reading_refuses_before_touching_any_file(self, tmp_path: Path) -> None:
+        with pytest.raises(BrowserCookieError) as exc:
+            read_browser_session(BASE, "chrome", cookies_path=tmp_path / "does-not-exist")
+        assert str(exc.value) == CHROMIUM_UNSUPPORTED
+
+    async def test_configured_chrome_source_fails_and_never_logs_in(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        settings = SessionSettings(
+            base_url=BASE,
+            username="alice",
+            password="s3cret-pw-alice",
+            login_mode="form",  # a login would be possible; it must not happen
+            session_source="browser-edge",
+            session_file=tmp_path / "s.json",
         )
-        local_state = tmp_path / "Local State"
-        key = base64.b64encode(b"DPAPI" + b"\x01" * 32).decode()
-        local_state.write_text(json.dumps({"os_crypt": {"encrypted_key": key}}))
-        return ChromiumPaths(cookies_db=cookies_db, local_state=local_state)
+        manager = SessionManager(settings, transport=fake.transport())
+        with pytest.raises(BrowserCookieError) as exc:
+            await manager.login()
+        assert str(exc.value) == CHROMIUM_UNSUPPORTED
+        assert fake.login_count == 0
+        assert SessionStore(settings.store_path).load() is None
 
-    def test_helper_receives_only_the_two_blobs_and_the_key(self, tmp_path: Path) -> None:
-        paths = self._paths(tmp_path)
-        seen: dict[str, object] = {}
+    def test_cli_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from typer.testing import CliRunner
 
-        def fake_helper(payload: dict[str, object]) -> str:
-            seen.update(payload)
-            cookies = payload["cookies"]
-            assert set(cookies) == {"JSESSIONID", "jama-csrf-token"}  # not "other"
-            # The helper would decrypt; here we just hand back fixed plaintext.
-            return json.dumps({"JSESSIONID": "sid-abc", "jama-csrf-token": "csrf-xyz"})
+        from jama_cli.main import app
 
-        session = read_chromium(BASE, paths, helper_runner=fake_helper)
-        assert session.cookie_value("JSESSIONID") == "sid-abc"
-        assert session.csrf_token == "csrf-xyz"
-        assert "encrypted_key" in seen
-        # The blobs are passed as base64, decoding to the stored bytes.
-        assert base64.b64decode(seen["cookies"]["JSESSIONID"]) == b"v10enc-sid"  # type: ignore[index]
+        for name in ("JAMA_SESSION_SOURCE", "JAMA_API_KEY", "JAMA_CLIENT_ID", "JAMA_USERNAME"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("JAMA_URL", BASE)
+        monkeypatch.setenv("JAMA_AUTH_TYPE", "session")
+        result = CliRunner().invoke(app, ["login", "--from-browser", "chrome"])
+        assert result.exit_code == 1
+        assert "Reading Chrome/Edge cookies is not supported" in result.output.replace("\n", " ")
 
-    def test_helper_failure_is_a_clear_error(self, tmp_path: Path) -> None:
-        paths = self._paths(tmp_path)
+    def test_no_helper_script_is_shipped(self) -> None:
+        from jama_cli import core
 
-        def bad_helper(payload: dict[str, object]) -> str:
-            return "not json"
-
-        with pytest.raises(BrowserCookieError):
-            read_chromium(BASE, paths, helper_runner=bad_helper)
-
-    def test_missing_cookie_does_not_call_the_helper(self, tmp_path: Path) -> None:
-        cookies_db = tmp_path / "Cookies"
-        make_chromium_db(cookies_db, [("jama-csrf-token", b"v10enc", HOST)])
-        (tmp_path / "Local State").write_text(
-            json.dumps({"os_crypt": {"encrypted_key": base64.b64encode(b"DPAPIk").decode()}})
-        )
-        paths = ChromiumPaths(cookies_db=cookies_db, local_state=tmp_path / "Local State")
-
-        called = False
-
-        def helper(payload: dict[str, object]) -> str:
-            nonlocal called
-            called = True
-            return "{}"
-
-        with pytest.raises(BrowserCookieError):
-            read_chromium(BASE, paths, helper_runner=helper)
-        assert called is False
+        package_dir = Path(core.__file__).parent
+        assert list(package_dir.glob("*.ps1")) == []
+        assert "powershell" not in (package_dir / "browser_cookies.py").read_text().lower()
+        pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        assert ".ps1" not in pyproject.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -313,5 +288,289 @@ class TestBrowserLoginPath:
         assert recovered.cookie_value("JSESSIONID") == sid2
         assert fake.login_count == 0
 
-    def test_all_browsers_are_known(self) -> None:
-        assert set(BROWSERS) == {"firefox", "chrome", "edge"}
+    def test_only_firefox_is_supported(self) -> None:
+        assert set(BROWSERS) == {"firefox"}
+
+
+# ---------------------------------------------------------------------------
+# Logout: a browser-sourced session is the browser's own session
+# ---------------------------------------------------------------------------
+
+
+LOGOUT = ("GET", "/contour/logout.req")
+
+
+class TestLogoutSparesTheBrowser:
+    @pytest.fixture
+    def settings(self, tmp_path: Path) -> SessionSettings:
+        return SessionSettings(
+            base_url=BASE,
+            session_source="firefox",
+            browser_cookies_path=tmp_path / "ff" / "cookies.sqlite",
+            session_file=tmp_path / "sessions" / "s.json",
+        )
+
+    async def _browser_login(self, fake: FakeJama, settings: SessionSettings) -> tuple[Any, str]:
+        sid, csrf = fake.plant_session("alice")
+        db = settings.browser_cookies_path
+        assert db is not None
+        db.parent.mkdir(parents=True, exist_ok=True)
+        make_firefox_db(db, [("JSESSIONID", sid, HOST), ("jama-csrf-token", csrf, HOST)])
+        manager = SessionManager(settings, transport=fake.transport())
+        await manager.login()
+        return manager, sid
+
+    async def test_source_is_stored_in_the_session_file(self, settings: SessionSettings) -> None:
+        fake = FakeJama()
+        await self._browser_login(fake, settings)
+
+        assert json.loads(settings.store_path.read_text())["source"] == "browser-firefox"
+        stored = SessionStore(settings.store_path).load()
+        assert stored is not None and stored.from_browser
+
+    async def test_logout_removes_only_the_local_entry(self, settings: SessionSettings) -> None:
+        fake = FakeJama()
+        manager, sid = await self._browser_login(fake, settings)
+
+        result = await manager.logout()
+
+        assert result.had_session and result.source == "browser-firefox"
+        assert result.server_session_ended is False
+        assert LOGOUT not in fake.requests
+        assert fake.is_authenticated(sid)  # the browser is still signed in
+        assert not settings.store_path.exists()
+
+    async def test_end_server_session_calls_logout_with_the_csrf_header(
+        self, settings: SessionSettings
+    ) -> None:
+        fake = FakeJama()
+        manager, sid = await self._browser_login(fake, settings)
+
+        result = await manager.logout(end_server_session=True)
+
+        assert result.server_session_ended is True
+        assert fake.requests.count(LOGOUT) == 1
+        # The fake only ends a session when logout.req carries the CSRF header.
+        assert not fake.is_authenticated(sid)
+        assert not settings.store_path.exists()
+
+    async def test_source_survives_a_token_repair(self, settings: SessionSettings) -> None:
+        fake = FakeJama()
+        manager, _sid = await self._browser_login(fake, settings)
+        data = json.loads(settings.store_path.read_text())
+        data["csrf_token"] = "wrong-token"
+        settings.store_path.write_text(json.dumps(data))
+
+        from jama_cli.core.http_client import JamaHttpClient
+
+        fresh = SessionManager(settings, transport=fake.transport())
+        async with JamaHttpClient(BASE, session=fresh, transport=fake.transport()) as client:
+            await client.get("items/1")
+
+        stored = SessionStore(settings.store_path).load()
+        assert stored is not None and stored.source == "browser-firefox"
+
+    def test_cli_logout_messages(
+        self, settings: SessionSettings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        from typer.testing import CliRunner
+
+        from jama_cli.commands import auth
+        from jama_cli.main import app
+
+        fake = FakeJama()
+        for name in ("JAMA_API_KEY", "JAMA_CLIENT_ID", "JAMA_USERNAME", "JAMA_SESSION_SOURCE"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("JAMA_URL", BASE)
+        monkeypatch.setenv("JAMA_AUTH_TYPE", "session")
+        monkeypatch.setattr(
+            auth,
+            "SessionManager",
+            lambda _settings: SessionManager(settings, transport=fake.transport()),
+        )
+        runner = CliRunner()
+
+        _manager, sid = asyncio.run(self._browser_login(fake, settings))
+        result = runner.invoke(app, ["logout"])
+        assert result.exit_code == 0
+        assert "your browser session is still active" in " ".join(result.output.split())
+        assert fake.is_authenticated(sid)
+        assert LOGOUT not in fake.requests
+
+        _manager, sid = asyncio.run(self._browser_login(fake, settings))
+        result = runner.invoke(app, ["logout", "--end-server-session"])
+        assert result.exit_code == 0
+        assert "signed out there too" in " ".join(result.output.split())
+        assert not fake.is_authenticated(sid)
+
+    async def test_mcp_logout_tool_follows_the_same_rule(self, settings: SessionSettings) -> None:
+        from jama_mcp_server.core.stdio_server import JamaStdioMCPServer
+        from jama_mcp_server.models import JamaConfig
+
+        fake = FakeJama()
+        _manager, sid = await self._browser_login(fake, settings)
+        server = JamaStdioMCPServer(JamaConfig(url=BASE, api_key="unused"), settings)
+        manager = SessionManager(settings, transport=fake.transport())
+        server._session = manager
+        server._api = object()  # type: ignore[assignment]
+
+        result = await server._execute_tool("logout_session", {})
+        assert result["server_session_ended"] is False
+        assert result["browser_session_still_active"] is True
+        assert result["source"] == "browser-firefox"
+        assert fake.is_authenticated(sid)
+        assert LOGOUT not in fake.requests
+        for secret in fake.live_secrets():
+            assert secret not in json.dumps(result)
+
+        _manager, sid = await self._browser_login(fake, settings)
+        result = await server._execute_tool("logout_session", {"end_server_session": True})
+        assert result["server_session_ended"] is True
+        assert result["browser_session_still_active"] is False
+        assert not fake.is_authenticated(sid)
+
+
+class TestLoginSourcedLogoutIsUnchanged:
+    async def test_form_session_is_ended_on_the_server(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        settings = SessionSettings(
+            base_url=BASE,
+            username="alice",
+            password="s3cret-pw-alice",
+            login_mode="form",
+            session_file=tmp_path / "s.json",
+        )
+        manager = SessionManager(settings, transport=fake.transport())
+        session = await manager.login()
+        sid = session.cookie_value("JSESSIONID") or ""
+        assert json.loads(settings.store_path.read_text())["source"] == "form"
+
+        result = await manager.logout()
+
+        assert result.server_session_ended is True
+        assert fake.requests.count(LOGOUT) == 1
+        assert not fake.is_authenticated(sid)
+
+    async def test_old_session_file_without_source_is_a_login_session(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        sid, csrf = fake.plant_session("alice")
+        path = tmp_path / "old.json"
+        # The format written before the "source" key existed.
+        path.write_text(
+            json.dumps(
+                {
+                    "base_url": BASE,
+                    "username": "alice",
+                    "cookies": [
+                        {"name": "JSESSIONID", "value": sid, "domain": HOST, "path": "/"},
+                        {"name": "jama-csrf-token", "value": csrf, "domain": HOST, "path": "/"},
+                    ],
+                    "csrf_token": csrf,
+                    "created_at": 1.0,
+                    "last_validated_at": 2.0,
+                }
+            )
+        )
+        stored = SessionStore(path).load()
+        assert stored is not None
+        assert stored.source == "login" and not stored.from_browser
+
+        settings = SessionSettings(base_url=BASE, session_file=path)
+        result = await SessionManager(settings, transport=fake.transport()).logout()
+        assert result.server_session_ended is True
+        assert not fake.is_authenticated(sid)
+
+
+# ---------------------------------------------------------------------------
+# Recovery follows where the session came from, not the process's own settings
+# ---------------------------------------------------------------------------
+
+
+class TestRecoveryFollowsTheStoredSource:
+    """`--from-browser` applies to one call; later processes must not log in on their own."""
+
+    def _settings(self, tmp_path: Path, source: str | None) -> SessionSettings:
+        return SessionSettings(
+            base_url=BASE,
+            username="alice",
+            password="s3cret-pw-alice",
+            login_mode="form",  # a login of its own would be possible
+            session_source=source,
+            browser_cookies_path=tmp_path / "ff" / "cookies.sqlite",
+            session_file=tmp_path / "sessions" / "s.json",
+        )
+
+    def _browser_has(self, settings: SessionSettings, sid: str, csrf: str) -> None:
+        db = settings.browser_cookies_path
+        assert db is not None
+        db.parent.mkdir(parents=True, exist_ok=True)
+        make_firefox_db(db, [("JSESSIONID", sid, HOST), ("jama-csrf-token", csrf, HOST)])
+
+    async def test_other_process_without_session_source_rereads_the_browser(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJama()
+        first = self._settings(tmp_path, "firefox")
+        self._browser_has(first, *fake.plant_session("alice"))
+        await SessionManager(first, transport=fake.transport()).login()
+
+        # The session ends; the user signs in again in the browser.
+        fake.kill_sessions()
+        new_sid, new_csrf = fake.plant_session("alice")
+        self._browser_has(first, new_sid, new_csrf)
+
+        # E.g. the MCP server: same store, but no session_source configured.
+        other = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        from jama_cli.core.http_client import JamaHttpClient
+
+        async with JamaHttpClient(BASE, session=other, transport=fake.transport()) as client:
+            item = await client.get("items/1")
+
+        assert item["data"]["id"] == 1
+        assert fake.login_count == 0  # no login of its own, no second session
+        stored = SessionStore(first.store_path).load()
+        assert stored is not None
+        assert stored.cookie_value("JSESSIONID") == new_sid
+        assert stored.source == "browser-firefox"
+
+    async def test_no_fallback_to_an_own_login_when_the_browser_is_signed_out(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJama()
+        first = self._settings(tmp_path, "firefox")
+        self._browser_has(first, *fake.plant_session("alice"))
+        await SessionManager(first, transport=fake.transport()).login()
+        fake.kill_sessions()  # signed out everywhere; the browser still holds dead cookies
+
+        other = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        with pytest.raises(Exception) as exc:
+            await other.recover(other.current())
+
+        assert "Sign in to Jama in the browser" in str(exc.value)
+        assert fake.login_count == 0
+
+    async def test_own_login_session_is_recovered_by_login_as_before(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        settings = self._settings(tmp_path, None)
+        manager = SessionManager(settings, transport=fake.transport())
+        await manager.login()
+        fake.kill_sessions()
+
+        recovered = await manager.recover(manager.current())
+
+        assert fake.login_count == 2 and recovered.source == "form"
+
+    async def test_explicit_login_replaces_a_browser_session_on_purpose(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJama()
+        first = self._settings(tmp_path, "firefox")
+        self._browser_has(first, *fake.plant_session("alice"))
+        await SessionManager(first, transport=fake.transport()).login()
+
+        own = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        session = await own.login(force=True)
+
+        assert session.source == "form" and fake.login_count == 1

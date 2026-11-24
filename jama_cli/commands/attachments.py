@@ -14,6 +14,7 @@ from jama_cli.output import (
     OutputFormat,
     format_single_item,
     print_error,
+    print_info,
     print_success,
     print_warning,
 )
@@ -65,6 +66,13 @@ def upload_attachment(
         str | None, typer.Option("--name", help="Attachment name (default: the file name)")
     ] = None,
     description: Annotated[str, typer.Option("--description", help="Attachment description")] = "",
+    project_id: Annotated[
+        int | None,
+        typer.Option(
+            "--project",
+            help="Project for the attachment (default: the project of the item or test run)",
+        ),
+    ] = None,
     no_link: Annotated[
         bool,
         typer.Option("--no-link", help="Do not link the attachment to the item's Attachments tab"),
@@ -81,6 +89,10 @@ def upload_attachment(
 
     Prints the attachment ID, the stored file's ID and the embed URL to use for
     an inline image.
+
+    The ID may also be a test run. Test runs are not items in the REST API, so
+    the attachment is created in the run's project but cannot be linked (there
+    is no Attachments tab to link to); the embed URL works without the link.
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
 
@@ -99,11 +111,14 @@ def upload_attachment(
             file_path,
             name=name,
             description=description,
+            project_id=project_id,
             link=not no_link,
             use_cache=not no_cache,
         )
         for warning in result.get("warnings", []):
             print_warning(warning)
+        for note in result.get("info", []):
+            print_info(note)
         if _wants_json(ctx, json_output):
             typer.echo(json.dumps(result, indent=2))
             return
@@ -111,7 +126,8 @@ def upload_attachment(
         print_success(f"{verb} attachment with ID: {result['attachment_id']}")
         typer.echo(f"File ID: {result['file_id']}")
         typer.echo(f"Embed URL: {result['embed_url']}")
-        typer.echo(f"Linked to item {item_id}: {'yes' if result.get('linked') else 'no'}")
+        target = "test run" if result.get("target_is_test_run") else "item"
+        typer.echo(f"Linked to {target} {item_id}: {'yes' if result.get('linked') else 'no'}")
 
     except Exception as e:
         print_error(f"Failed to upload attachment: {e}")

@@ -16,10 +16,20 @@ One JSON file per `(base_url, account)`: `~/.jama/sessions/<sha256(base_url|acco
   "username": "from users/current",
   "cookies": [{"name": "...", "value": "...", "domain": "...", "path": "..."}],
   "csrf_token": "...",
+  "source": "login",
   "created_at": 0.0,
   "last_validated_at": 0.0
 }
 ```
+
+`source` records where the session came from: `login` (this tool's browser login), `form`
+(native form login) or `browser-firefox` (taken over from the user's Firefox). Files written
+before the key existed are read as `login`.
+
+Logout depends on it. A `login` or `form` session is ended on the server with `logout.req`
+(plus the CSRF header) and the file is deleted. A `browser-*` session is the user's own browser
+session, so only the file is deleted; `jama logout --end-server-session` / the MCP parameter
+`end_server_session: true` end it on the server on purpose, which signs the browser out too.
 
 All cookies that apply to the base URL are kept, not only the two Jama ones, because load
 balancers in front of Jama may need their own. Mode 0600 (Windows: ACL reduced to the current
@@ -95,15 +105,24 @@ a visible login form, or 20 s without a session, switches to a visible window.
 
 ## Reusing the browser's session (`--from-browser`)
 
-`session_source` (`firefox` | `chrome` | `edge`) replaces the login with reading the two Jama
-cookies (`JSESSIONID`, `jama-csrf-token`) the user's own browser already holds for the configured
+`session_source: firefox` replaces the login with reading the two Jama
+cookies (`JSESSIONID`, `jama-csrf-token`) the user's own Firefox already holds for the configured
 host. The result is validated with the same `probe()` and stored like any other session. This
 avoids a second session on one-session-per-account instances, where the CLI's own login and the
 user's browser session would otherwise evict each other.
 
 It is wired as a `login_func`, so it feeds `SessionManager.login()` and `recover()` alike: a truly
 dead session (not the CSRF case) is re-read from the browser instead of an interactive login, and
-being non-interactive it honours `login_interactive: never`. Signing out in the browser ends the
+being non-interactive it honours `login_interactive: never`.
+
+`recover()` follows the `source` stored with the session, not only the process's own setting: a
+`browser-firefox` session is replaced by reading Firefox again even in a process that has no
+`session_source` (`SessionManager._recovery_settings()`). Otherwise a session taken over with
+`jama login --from-browser firefox` would, once it ended, be replaced by a login of the tool's
+own in another process (an MCP server, say), which is a second session and can sign the user out
+in the browser. If Firefox has no valid session either, recovery fails with a message; it never
+falls back to a login. Only an explicit `jama login` without `--from-browser` replaces a
+browser-sourced session by one of the tool's own. Signing out in the browser ends the
 shared session for the CLI too, by design.
 
 Runtime target is "CLI/MCP under WSL, browser on the Windows host"; cookie stores are read from
@@ -112,15 +131,14 @@ live, locked cookie database is never opened in place: it is copied with its `-w
 sidecars to a temp file, opened read-only, and deleted afterwards. Only the two cookies, only for
 the configured host, are read; values are never logged or raised.
 
-- Firefox stores values in clear text (`moz_cookies`), so everything runs inside WSL.
-- Chrome/Edge encrypt the values and, since v127, bind the key to the Windows user (App-Bound
-  Encryption). Python reads the encrypted blobs and the wrapped key from the copied database and
-  `Local State`, then hands them to a bundled PowerShell helper
-  (`jama_cli/core/jama_read_chrome_cookies.ps1`, fed on stdin so no Windows path is translated).
-  The helper runs as the user, DPAPI-unwraps the key and AES-GCM-decrypts the two values (v10),
-  and prints only those values as JSON. App-Bound (v20) blobs are not unwrapped; the helper fails
-  with a clear message and the CLI stops rather than silently logging in again. The helper
-  contract (base64 blobs in, two values out) is mocked in the tests.
+Firefox stores values in clear text (`moz_cookies`), so this is a file read inside WSL.
+
+Chrome and Edge are not supported, on purpose. Since v127 they bind the cookie key to the Windows
+user (App-Bound Encryption, `v20` values). An earlier version of this tool shipped a PowerShell
+helper that DPAPI-unwrapped the key; it was removed because it could not work (Windows PowerShell
+5.1 has no AES-GCM, and `v20` cannot be unwrapped from outside the browser) and because a script
+that decrypts a browser's cookie key is the pattern endpoint security flags as an infostealer.
+`chrome` / `edge` as a source fail fast with an explanation and never fall back to a fresh login.
 
 ## Verified against a real Jama instance
 

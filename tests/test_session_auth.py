@@ -115,6 +115,7 @@ class TestSessionStore:
             "csrf_token",
             "created_at",
             "last_validated_at",
+            "source",
         }
         assert set(on_disk["cookies"][0]) == {"name", "value", "domain", "path"}
 
@@ -667,10 +668,13 @@ class TestLogoutAndStatus:
         sid = session.cookie_value("JSESSIONID") or ""
         assert settings.store_path.exists()
 
-        assert await manager.logout() is True
+        result = await manager.logout()
+        assert result.had_session is True
+        assert result.server_session_ended is True
+        assert result.source == "form"
         assert not fake.is_authenticated(sid)
         assert not settings.store_path.exists()
-        assert await manager.logout() is False
+        assert (await manager.logout()).had_session is False
 
     async def test_status_has_no_secrets(self, fake: FakeJama, settings: SessionSettings) -> None:
         manager = SessionManager(settings, transport=fake.transport())
@@ -922,7 +926,13 @@ class TestMcpSessionTools:
                 assert secret not in json.dumps(status)
 
             result = await server._execute_tool("logout_session", {})
-            assert result == {"logged_out": True, "had_session": True}
+            assert result == {
+                "logged_out": True,
+                "had_session": True,
+                "source": "form",
+                "server_session_ended": True,
+                "browser_session_still_active": False,
+            }
             assert not settings.store_path.exists()
             assert not any(s["user"] for s in fake.sessions.values())
         finally:

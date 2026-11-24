@@ -58,7 +58,7 @@ class JamaProfile(BaseModel):
     )
     session_source: str | None = Field(
         default=None,
-        description="Reuse the browser's session: firefox, chrome or edge (None = log in)",
+        description="Reuse the browser's session: firefox (None = log in)",
     )
     browser_cookie_profile: str | None = Field(
         default=None, description="Browser profile to read cookies from (default: the main one)"
