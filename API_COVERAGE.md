@@ -139,6 +139,11 @@ All 70 operations accessible via:
 Every method of the async API (`jama_cli/core/api.py`) has a tool, except
 `post_item_attachment`. Run the server and call `tools/list` for the current set.
 
+The attachment file operations (`post_project_attachment`, `put_attachment_file`,
+`post_item_attachment`, `get_attachment_file`, `get_file_by_url`) are not exposed one by
+one but through the tools `upload_attachment`, `attach_screenshot_to_test_run` and
+`download_attachment`. `update_test_run` is a read-modify-write on top of `put_test_run`.
+
 ### SSE Streaming
 Real-time event streaming via:
 - `GET /v1/sse` - Persistent connection

@@ -19,6 +19,7 @@ from mcp.types import TextContent, Tool
 from jama_cli.core.api import JamaApi
 from jama_cli.core.http_client import JamaHttpClient
 from jama_cli.core.session import SessionManager, SessionSettings
+from jama_mcp_server.core import attachment_tools
 from jama_mcp_server.models import JamaConfig
 
 
@@ -39,6 +40,7 @@ class JamaStdioMCPServer:
         self._session: SessionManager | None = None
         self._api: JamaApi | None = None
         self._http: JamaHttpClient | None = None
+        self._attachment_tools: attachment_tools.AttachmentTools | None = None
         self.mcp = Server("jama-mcp-server")
 
         # Register request handlers
@@ -663,16 +665,35 @@ class JamaStdioMCPServer:
                 ),
                 Tool(
                     name="update_test_run",
-                    description="Update a test run (e.g. set status/result)",
+                    description=(
+                        "Modifies Jama: partial update of a test run (e.g. set a step's "
+                        "status or result). The given values are merged into the current "
+                        "run, so steps and fields that are not named are kept. In "
+                        "data.fields.testRunSteps entry N updates step N ({} or null leaves "
+                        "a step alone); or use step + step_fields to update one step."
+                    ),
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "test_run_id": {"type": "integer", "description": "Test run ID"},
-                            "data": {"type": "object", "description": "Test run data to update"},
+                            "data": {
+                                "type": "object",
+                                "description": 'Fields to update: {"fields": {...}}',
+                            },
+                            "step": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Step number, from 1 (with step_fields)",
+                            },
+                            "step_fields": {
+                                "type": "object",
+                                "description": 'Keys to set on that step, e.g. {"status": "PASSED"}',
+                            },
                         },
-                        "required": ["test_run_id", "data"],
+                        "required": ["test_run_id"],
                     },
                 ),
+                *attachment_tools.tool_definitions(),
                 Tool(
                     name="get_session_status",
                     description=(
@@ -912,8 +933,11 @@ class JamaStdioMCPServer:
                 arguments.get("testrun_status_to_include"),
             )
 
-        elif name == "update_test_run":
-            return await api.put_test_run(arguments["test_run_id"], arguments["data"])
+        elif name in attachment_tools.TOOL_NAMES:
+            # Attachments, screenshots and read-modify-write test run updates.
+            if self._attachment_tools is None:
+                self._attachment_tools = attachment_tools.AttachmentTools.for_api(api)
+            return await self._attachment_tools.call(name, arguments)
 
         else:
             raise ValueError(f"Unknown tool: {name}")

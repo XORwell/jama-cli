@@ -29,6 +29,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `get_item_types`, `get_pick_list`, `get_pick_list_options`, `get_tagged_items`, `create_tag`,
   `get_baseline_versioned_items`, `get_user`
 - `get_filter_results` MCP tool accepts an optional `project_id`
+- Attachments: `jama attachments upload` now really uploads (create, file upload, link) and
+  prints the attachment id, the stored file's id and the embed URL for inline images; new
+  options `--name`, `--description`, `--no-link`, `--no-cache`, `--json`; new commands
+  `jama attachments download` and `jama attachments download-url`
+- Test run results: new command group `jama testruns` with `add-screenshot` (embed images in
+  the actual results of a run or of one step), `set-actual` (append or `--replace` HTML) and
+  `get`. Edits are a verified read-modify-write that keeps other steps, statuses and existing
+  content
+- Client API: `JamaClient.create_attachment`, `link_attachment`, `download_embedded`,
+  `embed_image_html`, `get_test_run`, `append_to_actual_results`,
+  `attach_screenshots_to_test_run`, `update_test_run`
+- stdio MCP server: tools `upload_attachment`, `attach_screenshot_to_test_run`,
+  `download_attachment` (file path or base64 content) and `get_test_run`
+- Under `auth_type: session`, an attachment upload that Jama refuses through the REST API
+  falls back to the web UI's own, undocumented endpoint (`/ui/internal/attachments`); other
+  auth modes never use it
+- Re-running an upload reuses the earlier attachment (local map of file hashes under
+  `~/.cache/jama-cli/uploads/`); upload size limit via `JAMA_MAX_ATTACHMENT_BYTES` (default 50 MB)
+
+### Changed
+- `JamaClient.upload_attachment` returns a dict (`attachment_id`, `file_id`, `embed_url`, ...)
+  instead of an int, and `JamaClient.download_attachment` returns the written path
+- MCP tool `update_test_run` merges the given values into the current test run and returns a
+  result object instead of the HTTP status; `data` is optional when `step` + `step_fields`
+  are given
+
+### Fixed
+- `upload_attachment` passed the file path as an attachment id and never uploaded anything
+- `download_attachment` wrote the attachment's metadata as JSON instead of the file
+- MCP tool `update_test_run` sent a partial update as the whole PUT body, which could wipe
+  the other steps of a test run
+- Calls that return Jama's status (`post_item_attachment`, `put_test_run`, `post_item_tag`,
+  ...) failed with `ValueError` when Jama reported the status as text (`"OK"`)
 
 ## [0.1.4] - 2026-04-21
 

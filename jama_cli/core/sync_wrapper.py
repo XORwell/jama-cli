@@ -67,6 +67,15 @@ class SyncJamaApi:
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result()
 
+    @property
+    def async_api(self) -> JamaApi:
+        """The wrapped async API (for services that are run with :meth:`run`)."""
+        return self._api
+
+    def run(self, coro: Any) -> Any:
+        """Run a coroutine that uses :attr:`async_api` on the background event loop."""
+        return self._run(coro)
+
     def close(self) -> None:
         """Shut down the background event loop and HTTP client."""
         asyncio.run_coroutine_threadsafe(self._http.close(), self._loop).result()
@@ -227,6 +236,9 @@ class SyncJamaApi:
     def get_testruns(self, test_cycle_id: int) -> list[dict[str, Any]]:
         return self._run(self._api.get_testruns(test_cycle_id))
 
+    def get_test_run(self, test_run_id: int) -> dict[str, Any]:
+        return self._run(self._api.get_test_run(test_run_id))
+
     def create_test_plan(
         self,
         project_id: int,
@@ -294,6 +306,25 @@ class SyncJamaApi:
 
     def post_item_attachment(self, item_id: int, attachment_id: int) -> int:
         return self._run(self._api.post_item_attachment(item_id, attachment_id))
+
+    def get_item_attachments(self, item_id: int) -> list[dict[str, Any]]:
+        return self._run(self._api.get_item_attachments(item_id))
+
+    def post_project_attachment(self, project_id: int, name: str, description: str = "") -> int:
+        return self._run(self._api.post_project_attachment(project_id, name, description))
+
+    def put_attachment_file(
+        self, attachment_id: int, file_name: str, content: bytes, content_type: str
+    ) -> int:
+        return self._run(
+            self._api.put_attachment_file(attachment_id, file_name, content, content_type)
+        )
+
+    def get_attachment_file(self, attachment_id: int) -> bytes:
+        return self._run(self._api.get_attachment_file(attachment_id))
+
+    def get_file_by_url(self, url: str) -> bytes:
+        return self._run(self._api.get_file_by_url(url))
 
     # =========================================================================
     # Workflow
