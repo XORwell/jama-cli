@@ -59,8 +59,8 @@ def login(
         str | None,
         typer.Option(
             "--from-browser",
-            help="Reuse your running browser's Jama session: firefox, chrome or edge "
-            "(no second login, so your browser stays signed in)",
+            help="Reuse your running Firefox's Jama session: firefox "
+            "(no second login, so your browser stays signed in; Chrome/Edge are not supported)",
         ),
     ] = None,
     browser_cookie_profile: Annotated[
@@ -71,7 +71,7 @@ def login(
         Path | None,
         typer.Option(
             "--browser-cookies-path",
-            help="Path to the browser cookie store (Firefox) or User Data dir (Chrome/Edge)",
+            help="Path to Firefox's cookies.sqlite, or to the directory with profiles.ini",
         ),
     ] = None,
     browser_channel: Annotated[
@@ -108,7 +108,7 @@ def login(
 
     Examples:
         jama login                          # Browser login (SSO or native form)
-        jama login --from-browser firefox   # Reuse your running browser's session
+        jama login --from-browser firefox   # Reuse your running Firefox's session
         jama login --browser-channel msedge # Use the installed Edge
         jama login --mode form              # No browser; JAMA_USERNAME / JAMA_PASSWORD
         jama login --debug-dir ./login-dbg  # Screenshots for diagnosing a failed login
@@ -116,12 +116,13 @@ def login(
     profile = _session_profile(ctx)
     settings = profile.session_settings()
     if from_browser:
-        from jama_cli.core.browser_cookies import BROWSERS, BrowserCookieError, normalise_source
+        from jama_cli.core.browser_cookies import BrowserCookieError, normalise_source
 
         try:
             normalise_source(from_browser)
-        except BrowserCookieError:
-            print_error(f"--from-browser must be one of: {', '.join(BROWSERS)}")
+        except BrowserCookieError as e:
+            # Fail fast; never fall back to a fresh login from here.
+            print_error(str(e))
             raise typer.Exit(1) from None
         settings.session_source = from_browser
     if browser_cookie_profile:

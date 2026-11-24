@@ -8,16 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Reuse the session from the user's own browser instead of a second login:
-  `jama login --from-browser firefox|chrome|edge` (or `session_source` / `JAMA_SESSION_SOURCE`).
+- Reuse the session from the user's own Firefox instead of a second login:
+  `jama login --from-browser firefox` (or `session_source` / `JAMA_SESSION_SOURCE`).
   Reads only the `JSESSIONID` and `jama-csrf-token` cookies for the configured host, so browser,
   CLI and MCP server share one session and do not evict each other on one-session instances.
-  Works in the "CLI in WSL, browser on Windows" setup: Firefox is read directly (clear text);
-  Chrome/Edge values are decrypted by a bundled PowerShell helper that runs as the user on
-  Windows. Non-interactive, so it also works with `login_interactive: never`; a truly dead
-  session is re-read from the browser rather than prompting. New settings
-  `browser_cookie_profile` and `browser_cookies_path`. Cookie values are never logged, and
-  copied cookie databases are deleted after reading
+  Works in the "CLI in WSL, browser on Windows" setup; Firefox stores cookie values in clear
+  text, so it is a plain file read. Non-interactive, so it also works with
+  `login_interactive: never`; a truly dead session is re-read from the browser rather than
+  prompting. New settings `browser_cookie_profile` and `browser_cookies_path`. Cookie values are
+  never logged, and the copied cookie database is deleted after reading. Chrome and Edge are not
+  supported (App-Bound Encryption) and fail with a clear message
 - Browser-session ("SSO cookie") auth mode, `auth_type: session` / `JAMA_AUTH_TYPE=session`:
   log in once in a real browser (or with the native login form) and work as yourself, with
   your own Jama permissions, without API credentials

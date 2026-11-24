@@ -95,8 +95,8 @@ a visible login form, or 20 s without a session, switches to a visible window.
 
 ## Reusing the browser's session (`--from-browser`)
 
-`session_source` (`firefox` | `chrome` | `edge`) replaces the login with reading the two Jama
-cookies (`JSESSIONID`, `jama-csrf-token`) the user's own browser already holds for the configured
+`session_source: firefox` replaces the login with reading the two Jama
+cookies (`JSESSIONID`, `jama-csrf-token`) the user's own Firefox already holds for the configured
 host. The result is validated with the same `probe()` and stored like any other session. This
 avoids a second session on one-session-per-account instances, where the CLI's own login and the
 user's browser session would otherwise evict each other.
@@ -112,15 +112,14 @@ live, locked cookie database is never opened in place: it is copied with its `-w
 sidecars to a temp file, opened read-only, and deleted afterwards. Only the two cookies, only for
 the configured host, are read; values are never logged or raised.
 
-- Firefox stores values in clear text (`moz_cookies`), so everything runs inside WSL.
-- Chrome/Edge encrypt the values and, since v127, bind the key to the Windows user (App-Bound
-  Encryption). Python reads the encrypted blobs and the wrapped key from the copied database and
-  `Local State`, then hands them to a bundled PowerShell helper
-  (`jama_cli/core/jama_read_chrome_cookies.ps1`, fed on stdin so no Windows path is translated).
-  The helper runs as the user, DPAPI-unwraps the key and AES-GCM-decrypts the two values (v10),
-  and prints only those values as JSON. App-Bound (v20) blobs are not unwrapped; the helper fails
-  with a clear message and the CLI stops rather than silently logging in again. The helper
-  contract (base64 blobs in, two values out) is mocked in the tests.
+Firefox stores values in clear text (`moz_cookies`), so this is a file read inside WSL.
+
+Chrome and Edge are not supported, on purpose. Since v127 they bind the cookie key to the Windows
+user (App-Bound Encryption, `v20` values). An earlier version of this tool shipped a PowerShell
+helper that DPAPI-unwrapped the key; it was removed because it could not work (Windows PowerShell
+5.1 has no AES-GCM, and `v20` cannot be unwrapped from outside the browser) and because a script
+that decrypts a browser's cookie key is the pattern endpoint security flags as an infostealer.
+`chrome` / `edge` as a source fail fast with an explanation and never fall back to a fresh login.
 
 ## Verified against a real Jama instance
 

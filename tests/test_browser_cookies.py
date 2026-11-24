@@ -1,13 +1,11 @@
 """Tests for reusing the browser's Jama session (``jama login --from-browser``).
 
-Firefox is exercised against a real (temporary) ``cookies.sqlite``; Chrome/Edge
-against a mocked Windows helper, so neither test needs a browser or Windows.
+Firefox is exercised against a real (temporary) ``cookies.sqlite``, so no browser
+is needed. Chrome and Edge are not supported and must be refused.
 """
 
 from __future__ import annotations
 
-import base64
-import json
 import sqlite3
 from pathlib import Path
 
@@ -15,12 +13,11 @@ import pytest
 
 from jama_cli.core.browser_cookies import (
     BROWSERS,
+    CHROMIUM_UNSUPPORTED,
     BrowserCookieError,
-    ChromiumPaths,
     host_matches,
     normalise_source,
     read_browser_session,
-    read_chromium,
     read_firefox,
 )
 from jama_cli.core.session import SessionManager, SessionSettings, browser_cookie_login
@@ -54,23 +51,6 @@ def make_firefox_db(path: Path, cookies: list[tuple[str, str, str]]) -> None:
     conn.close()
 
 
-def make_chromium_db(path: Path, cookies: list[tuple[str, bytes, str]]) -> None:
-    """Write a minimal Chromium Cookies db with (name, encrypted_value, host) rows."""
-    path.unlink(missing_ok=True)
-    conn = sqlite3.connect(path)
-    conn.execute(
-        "CREATE TABLE cookies "
-        "(name TEXT, encrypted_value BLOB, host_key TEXT, path TEXT, is_secure INTEGER)"
-    )
-    conn.executemany(
-        "INSERT INTO cookies (name, encrypted_value, host_key, path, is_secure) "
-        "VALUES (?, ?, ?, '/', 1)",
-        cookies,
-    )
-    conn.commit()
-    conn.close()
-
-
 # ---------------------------------------------------------------------------
 # pure helpers
 # ---------------------------------------------------------------------------
@@ -79,8 +59,8 @@ def make_chromium_db(path: Path, cookies: list[tuple[str, bytes, str]]) -> None:
 class TestHelpers:
     def test_normalise_source(self) -> None:
         assert normalise_source("firefox") == "firefox"
-        assert normalise_source("browser-chrome") == "chrome"
-        assert normalise_source("EDGE") == "edge"
+        assert normalise_source("browser-firefox") == "firefox"
+        assert normalise_source("FireFox") == "firefox"
         assert normalise_source(None) is None
         assert normalise_source("login") is None
         assert normalise_source("") is None
@@ -149,71 +129,64 @@ class TestFirefox:
 
 
 # ---------------------------------------------------------------------------
-# Chrome / Edge (encrypted; helper mocked)
+# Chrome / Edge: refused, never a fallback to a fresh login
 # ---------------------------------------------------------------------------
 
 
-class TestChromium:
-    def _paths(self, tmp_path: Path) -> ChromiumPaths:
-        cookies_db = tmp_path / "Cookies"
-        make_chromium_db(
-            cookies_db,
-            [
-                ("JSESSIONID", b"v10enc-sid", HOST),
-                ("jama-csrf-token", b"v10enc-csrf", HOST),
-                ("other", b"v10enc-x", "other.com"),
-            ],
+class TestChromiumIsRefused:
+    @pytest.mark.parametrize(
+        "source", ["chrome", "edge", "browser-chrome", "browser-edge", "Chrome", "msedge"]
+    )
+    def test_source_is_rejected_with_the_explanation(self, source: str) -> None:
+        with pytest.raises(BrowserCookieError) as exc:
+            normalise_source(source)
+        assert str(exc.value) == CHROMIUM_UNSUPPORTED
+        assert "App-Bound Encryption" in str(exc.value)
+        assert "--from-browser firefox" in str(exc.value)
+
+    def test_reading_refuses_before_touching_any_file(self, tmp_path: Path) -> None:
+        with pytest.raises(BrowserCookieError) as exc:
+            read_browser_session(BASE, "chrome", cookies_path=tmp_path / "does-not-exist")
+        assert str(exc.value) == CHROMIUM_UNSUPPORTED
+
+    async def test_configured_chrome_source_fails_and_never_logs_in(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        settings = SessionSettings(
+            base_url=BASE,
+            username="alice",
+            password="s3cret-pw-alice",
+            login_mode="form",  # a login would be possible; it must not happen
+            session_source="browser-edge",
+            session_file=tmp_path / "s.json",
         )
-        local_state = tmp_path / "Local State"
-        key = base64.b64encode(b"DPAPI" + b"\x01" * 32).decode()
-        local_state.write_text(json.dumps({"os_crypt": {"encrypted_key": key}}))
-        return ChromiumPaths(cookies_db=cookies_db, local_state=local_state)
+        manager = SessionManager(settings, transport=fake.transport())
+        with pytest.raises(BrowserCookieError) as exc:
+            await manager.login()
+        assert str(exc.value) == CHROMIUM_UNSUPPORTED
+        assert fake.login_count == 0
+        assert SessionStore(settings.store_path).load() is None
 
-    def test_helper_receives_only_the_two_blobs_and_the_key(self, tmp_path: Path) -> None:
-        paths = self._paths(tmp_path)
-        seen: dict[str, object] = {}
+    def test_cli_fails_fast(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from typer.testing import CliRunner
 
-        def fake_helper(payload: dict[str, object]) -> str:
-            seen.update(payload)
-            cookies = payload["cookies"]
-            assert set(cookies) == {"JSESSIONID", "jama-csrf-token"}  # not "other"
-            # The helper would decrypt; here we just hand back fixed plaintext.
-            return json.dumps({"JSESSIONID": "sid-abc", "jama-csrf-token": "csrf-xyz"})
+        from jama_cli.main import app
 
-        session = read_chromium(BASE, paths, helper_runner=fake_helper)
-        assert session.cookie_value("JSESSIONID") == "sid-abc"
-        assert session.csrf_token == "csrf-xyz"
-        assert "encrypted_key" in seen
-        # The blobs are passed as base64, decoding to the stored bytes.
-        assert base64.b64decode(seen["cookies"]["JSESSIONID"]) == b"v10enc-sid"  # type: ignore[index]
+        for name in ("JAMA_SESSION_SOURCE", "JAMA_API_KEY", "JAMA_CLIENT_ID", "JAMA_USERNAME"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("JAMA_URL", BASE)
+        monkeypatch.setenv("JAMA_AUTH_TYPE", "session")
+        result = CliRunner().invoke(app, ["login", "--from-browser", "chrome"])
+        assert result.exit_code == 1
+        assert "Reading Chrome/Edge cookies is not supported" in result.output.replace("\n", " ")
 
-    def test_helper_failure_is_a_clear_error(self, tmp_path: Path) -> None:
-        paths = self._paths(tmp_path)
+    def test_no_helper_script_is_shipped(self) -> None:
+        from jama_cli import core
 
-        def bad_helper(payload: dict[str, object]) -> str:
-            return "not json"
-
-        with pytest.raises(BrowserCookieError):
-            read_chromium(BASE, paths, helper_runner=bad_helper)
-
-    def test_missing_cookie_does_not_call_the_helper(self, tmp_path: Path) -> None:
-        cookies_db = tmp_path / "Cookies"
-        make_chromium_db(cookies_db, [("jama-csrf-token", b"v10enc", HOST)])
-        (tmp_path / "Local State").write_text(
-            json.dumps({"os_crypt": {"encrypted_key": base64.b64encode(b"DPAPIk").decode()}})
-        )
-        paths = ChromiumPaths(cookies_db=cookies_db, local_state=tmp_path / "Local State")
-
-        called = False
-
-        def helper(payload: dict[str, object]) -> str:
-            nonlocal called
-            called = True
-            return "{}"
-
-        with pytest.raises(BrowserCookieError):
-            read_chromium(BASE, paths, helper_runner=helper)
-        assert called is False
+        package_dir = Path(core.__file__).parent
+        assert list(package_dir.glob("*.ps1")) == []
+        assert "powershell" not in (package_dir / "browser_cookies.py").read_text().lower()
+        pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        assert ".ps1" not in pyproject.read_text()
 
 
 # ---------------------------------------------------------------------------
@@ -313,5 +286,5 @@ class TestBrowserLoginPath:
         assert recovered.cookie_value("JSESSIONID") == sid2
         assert fake.login_count == 0
 
-    def test_all_browsers_are_known(self) -> None:
-        assert set(BROWSERS) == {"firefox", "chrome", "edge"}
+    def test_only_firefox_is_supported(self) -> None:
+        assert set(BROWSERS) == {"firefox"}

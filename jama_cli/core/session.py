@@ -60,7 +60,7 @@ class SessionSettings:
     session_file: Path | None = None
     keepalive_minutes: float = 0.0
     # Reuse the session from the user's own browser instead of logging in again.
-    # None | "firefox" | "chrome" | "edge" (also accepts a "browser-" prefix).
+    # None | "firefox" (also accepts a "browser-" prefix). Chrome/Edge are rejected.
     session_source: str | None = None
     browser_cookie_profile: str | None = None
     browser_cookies_path: Path | None = None
