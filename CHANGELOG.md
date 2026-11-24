@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- In WSL the Windows Firefox was not found when Windows directories are not on `PATH`
+  (`appendWindowsPath=false`, or an MCP client starting the server with a reduced environment):
+  `cmd.exe` is now also tried by its absolute path, and with interop off the single Windows user
+  with a Firefox profile is used (never a guess between several users)
 - `jama login --from-browser firefox` never found a Jama session: `JSESSIONID` and
   `jama-csrf-token` are session cookies, which Firefox does not write to `cookies.sqlite`. They
   are now read from Firefox's session store (`sessionstore-backups/recovery.jsonlz4`, decoded

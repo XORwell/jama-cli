@@ -157,29 +157,79 @@ def in_wsl() -> bool:
         return False
 
 
+# Where WSL mounts the Windows system drive; the other drives are its siblings.
+WSL_WINDOWS_DRIVE = Path("/mnt/c")
+# A Windows user's Firefox directory, relative to the user's home.
+WINDOWS_FIREFOX_DIR = "AppData/Roaming/Mozilla/Firefox"
+
+
+def _windows_userprofile() -> str | None:
+    """``%USERPROFILE%`` as Windows reports it, e.g. ``C:\\Users\\me``.
+
+    ``cmd.exe`` is tried from ``PATH`` first and then by its absolute path, because
+    WSL leaves the Windows directories off ``PATH`` with ``appendWindowsPath=false``
+    and an MCP client may start the server with a reduced environment.
+    """
+    executables = ("cmd.exe", str(WSL_WINDOWS_DRIVE / "Windows/System32/cmd.exe"))
+    cwd = str(WSL_WINDOWS_DRIVE) if WSL_WINDOWS_DRIVE.is_dir() else None
+    for executable in executables:
+        try:
+            out = subprocess.run(
+                [executable, "/c", "echo %USERPROFILE%"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                cwd=cwd,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        profile = out.stdout.strip()
+        if profile and "%USERPROFILE%" not in profile and profile[1:3] == ":\\":
+            return profile
+    return None
+
+
+def _only_windows_user_with_firefox() -> Path | None:
+    """The one Windows user home under ``/mnt/c/Users`` that has a Firefox profile.
+
+    Used when Windows programs cannot be started from WSL at all (interop off).
+    With several such users there is no safe choice, so None is returned rather
+    than reading another user's session.
+    """
+    homes: list[Path] = []
+    try:
+        entries = list((WSL_WINDOWS_DRIVE / "Users").iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        try:
+            if (entry / WINDOWS_FIREFOX_DIR / "profiles.ini").is_file():
+                homes.append(entry)
+        except OSError:
+            continue
+    return homes[0] if len(homes) == 1 else None
+
+
 def windows_user_home() -> Path | None:
     """The Windows user's home as a WSL path (``/mnt/c/Users/<user>``), if found.
 
     The Windows user name need not match the WSL one, so it is asked of Windows
-    (``cmd.exe``) rather than guessed.
+    (``cmd.exe``) rather than guessed. Only if Windows cannot be asked, the single
+    Windows user with a Firefox profile is used.
     """
-    try:
-        out = subprocess.run(
-            ["cmd.exe", "/c", "echo %USERPROFILE%"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            cwd="/mnt/c",
+    profile = _windows_userprofile()
+    if profile:
+        drive = profile[0].lower()
+        rest = profile[3:].replace("\\", "/")
+        path = WSL_WINDOWS_DRIVE.parent / drive / rest
+        if path.exists():
+            return path
+    home = _only_windows_user_with_firefox()
+    if home is not None:
+        logger.debug(
+            "Windows could not be asked for the user profile; using the only one with Firefox"
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    profile = out.stdout.strip()
-    if not profile or "%USERPROFILE%" in profile or profile[1:3] != ":\\":
-        return None
-    drive = profile[0].lower()
-    rest = profile[3:].replace("\\", "/")
-    path = Path(f"/mnt/{drive}/{rest}")
-    return path if path.exists() else None
+    return home
 
 
 def _copy_locked_db(db_path: Path) -> tuple[Path, Path]:
@@ -235,7 +285,7 @@ def firefox_root_candidates() -> list[Path]:
     if in_wsl():
         home = windows_user_home()
         if home is not None:
-            roots.append(home / "AppData/Roaming/Mozilla/Firefox")
+            roots.append(home / WINDOWS_FIREFOX_DIR)
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         base = Path(appdata) if appdata else Path.home() / "AppData/Roaming"

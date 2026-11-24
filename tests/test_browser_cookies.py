@@ -794,3 +794,76 @@ class TestProfileRoots:
         monkeypatch.setattr(browser_cookies.sys, "platform", "darwin")
         with pytest.raises(BrowserCookieError, match="Library/Application Support/Firefox"):
             read_browser_session(BASE, "firefox")
+
+
+# ---------------------------------------------------------------------------
+# WSL: finding the Windows user's home
+# ---------------------------------------------------------------------------
+
+
+class TestWindowsUserHome:
+    @pytest.fixture
+    def drive(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        c = tmp_path / "mnt" / "c"
+        (c / "Users" / "winme").mkdir(parents=True)
+        monkeypatch.setattr(browser_cookies, "WSL_WINDOWS_DRIVE", c)
+        return c
+
+    @staticmethod
+    def _fake_cmd(monkeypatch: pytest.MonkeyPatch, works: set[str], profile: str) -> list[str]:
+        calls: list[str] = []
+
+        def run(args: list[str], **_: Any) -> Any:
+            calls.append(args[0])
+            if args[0] not in works:
+                raise FileNotFoundError(args[0])
+            return type("Done", (), {"stdout": profile + "\r\n"})()
+
+        monkeypatch.setattr(browser_cookies.subprocess, "run", run)
+        return calls
+
+    def test_cmd_on_path(self, drive: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._fake_cmd(monkeypatch, {"cmd.exe"}, "C:\\Users\\winme")
+        assert browser_cookies.windows_user_home() == drive / "Users" / "winme"
+
+    def test_cmd_by_absolute_path_when_windows_is_not_on_path(
+        self, drive: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        absolute = str(drive / "Windows/System32/cmd.exe")
+        calls = self._fake_cmd(monkeypatch, {absolute}, "C:\\Users\\winme")
+
+        assert browser_cookies.windows_user_home() == drive / "Users" / "winme"
+        assert calls == ["cmd.exe", absolute]
+
+    def test_profile_on_another_drive(self, drive: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        (drive.parent / "d" / "Users" / "winme").mkdir(parents=True)
+        self._fake_cmd(monkeypatch, {"cmd.exe"}, "D:\\Users\\winme")
+        assert browser_cookies.windows_user_home() == drive.parent / "d" / "Users" / "winme"
+
+    def test_without_interop_the_only_firefox_user_is_used(
+        self, drive: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fake_cmd(monkeypatch, set(), "")
+        (drive / "Users" / "Public").mkdir()
+        firefox = drive / "Users" / "winme" / browser_cookies.WINDOWS_FIREFOX_DIR
+        firefox.mkdir(parents=True)
+        (firefox / "profiles.ini").write_text("[General]\n")
+
+        assert browser_cookies.windows_user_home() == drive / "Users" / "winme"
+
+    def test_without_interop_several_firefox_users_are_not_guessed(
+        self, drive: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fake_cmd(monkeypatch, set(), "")
+        for user in ("winme", "colleague"):
+            firefox = drive / "Users" / user / browser_cookies.WINDOWS_FIREFOX_DIR
+            firefox.mkdir(parents=True)
+            (firefox / "profiles.ini").write_text("[General]\n")
+
+        assert browser_cookies.windows_user_home() is None
+
+    def test_unusable_answer_falls_through(
+        self, drive: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._fake_cmd(monkeypatch, {"cmd.exe"}, "%USERPROFILE%")
+        assert browser_cookies.windows_user_home() is None
