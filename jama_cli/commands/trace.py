@@ -20,7 +20,7 @@ from rich.tree import Tree
 
 from jama_cli.config import get_profile_or_env
 from jama_cli.core.client import JamaClient
-from jama_cli.output import print_error, print_info
+from jama_cli.output import error_console, print_error, print_hint, print_info
 from jama_cli.output.formatters import OutputFormat, format_output
 
 app = typer.Typer(name="trace", help="Traceability analysis and coverage reports")
@@ -92,13 +92,13 @@ def trace_matrix(
         use_cache = not refresh
 
         if refresh:
-            console.print("[dim]Cache bypassed - fetching fresh data...[/dim]")
+            print_hint("Cache bypassed - fetching fresh data...")
 
         # Use optimized bulk fetching (2 API calls instead of N+1)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            console=console,
+            console=error_console,
         ) as progress:
             task1 = progress.add_task(f"Fetching items from project {project_id}...", total=None)
             items = client.get_items_bulk(project_id, use_cache=use_cache)
@@ -112,8 +112,8 @@ def trace_matrix(
             print_error("No items found in project")
             raise typer.Exit(1)
 
-        console.print(
-            f"  [dim]Analyzing {len(items)} items with {len(relationship_map)} relationship entries[/dim]"
+        print_hint(
+            f"  Analyzing {len(items)} items with {len(relationship_map)} relationship entries"
         )
 
         # Build item lookup
@@ -139,7 +139,7 @@ def trace_matrix(
             BarColumn(),
             TaskProgressColumn(),
             TimeElapsedColumn(),
-            console=console,
+            console=error_console,
         ) as progress:
             task = progress.add_task("Analyzing relationships...", total=len(source_items))
 
@@ -277,13 +277,13 @@ def trace_coverage(
         use_cache = not refresh
 
         if refresh:
-            console.print("[dim]Cache bypassed - fetching fresh data...[/dim]")
+            print_hint("Cache bypassed - fetching fresh data...")
 
         # Use optimized bulk fetching
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
-            console=console,
+            console=error_console,
         ) as progress:
             task1 = progress.add_task(f"Fetching items from project {project_id}...", total=None)
             items = client.get_items_bulk(project_id, use_cache=use_cache)
@@ -296,7 +296,7 @@ def trace_coverage(
         if item_type:
             items = [i for i in items if i.get("itemType") == item_type]
 
-        console.print(f"  [dim]Analyzing {len(items)} items[/dim]")
+        print_hint(f"  Analyzing {len(items)} items")
 
         # Get item types for display
         item_types_list = client.get_item_types()
@@ -319,7 +319,7 @@ def trace_coverage(
             BarColumn(),
             TaskProgressColumn(),
             TimeElapsedColumn(),
-            console=console,
+            console=error_console,
         ) as progress:
             task = progress.add_task("Analyzing coverage...", total=len(items))
 
