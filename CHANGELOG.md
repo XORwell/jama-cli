@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - stdio MCP server: session auth plus `get_session_status` and `logout_session` tools
   - Playwright is an optional extra: `pip install "jama-cli[browser]"`
 - New dependency: `filelock`
+- stdio MCP server: 19 more tools for API operations that had none: `get_items_page`,
+  `search_items`, `replace_item`, `get_item_version`, `get_item_lock`, `set_item_lock`,
+  `get_relationships`, `get_relationship`, `get_item_upstream_related`,
+  `get_item_downstream_related`, `delete_relationship`, `get_relationship_type`,
+  `get_item_types`, `get_pick_list`, `get_pick_list_options`, `get_tagged_items`, `create_tag`,
+  `get_baseline_versioned_items`, `get_user`
+- `get_filter_results` MCP tool accepts an optional `project_id`
 
 ## [0.1.4] - 2026-04-21
 
