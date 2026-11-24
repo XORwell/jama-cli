@@ -161,6 +161,45 @@ name; delete them afterwards).
   Takes `username`/`password` from the profile or `JAMA_USERNAME`/`JAMA_PASSWORD`. Does not need
   Playwright.
 
+### Reuse your running browser's session (`--from-browser`)
+
+By default `login` opens its own browser profile, which is a **second** Jama session. If your
+instance allows only one session per account, that second login and your real browser session
+evict each other, so you cannot browse and use the CLI/MCP server at the same time.
+
+`--from-browser` avoids that: it reads the Jama session cookies your browser already has and
+reuses them, so browser, CLI and MCP server share **one** session. No second login, nothing is
+evicted.
+
+```bash
+jama login --from-browser firefox     # read the session from Firefox
+jama login --from-browser chrome      # Chrome
+jama login --from-browser edge        # Edge
+# optional: a non-default browser profile, or an explicit cookie-store path
+jama login --from-browser firefox --browser-cookie-profile "default-release"
+jama login --from-browser chrome --browser-cookies-path "/mnt/c/Users/me/AppData/Local/Google/Chrome/User Data"
+```
+
+Set it permanently with `session_source: firefox|chrome|edge` (env `JAMA_SESSION_SOURCE`). It is
+non-interactive, so it works with `login_interactive: never`. Sign in to Jama in the browser
+first; if you sign out there, the shared session ends for the CLI too (that coupling is the point).
+
+**Runtime target — CLI in WSL, browser on Windows.** The Windows cookie stores are read from
+`/mnt/c/Users/<windows-user>/...` (the Windows user name is asked of Windows, not guessed). Only
+the two Jama cookies, and only for your configured host, are ever read; copied database files are
+deleted right after reading.
+
+- **Firefox** keeps cookie values in clear text, so this works entirely inside WSL.
+- **Chrome / Edge** encrypt the values and, since version 127, bind the key to the Windows user
+  (App-Bound Encryption). Decryption therefore runs **as you, on Windows**, through a bundled
+  PowerShell helper that returns only the two values. If it cannot decrypt (App-Bound v20, group
+  policy, or AV), the CLI says so and stops — it does **not** silently fall back to a fresh login
+  (which would evict your browser). Use `--from-browser firefox` or plain `jama login` instead.
+
+> Reading another application's browser cookies may be restricted by your company policy or
+> flagged by endpoint security. And, as with any session reuse, confirm with your Jama admin that
+> reusing a web session for REST is allowed on your instance.
+
 ### How the session is kept
 
 - The session is stored per Jama URL and account in `~/.jama/sessions/` (mode `0600`) and is
@@ -188,6 +227,9 @@ Environment variables override the profile.
 | `browser_channel` | `JAMA_BROWSER_CHANNEL` | bundled Chromium | `chrome`, `msedge`, ... |
 | `browser_profile_dir` | `JAMA_BROWSER_PROFILE_DIR` | `~/.jama/browser-profile` | Persistent browser profile |
 | `sso_selectors` | `JAMA_SSO_SELECTORS` | `#loginWithSSOButton`, `input[name="submitWithSSO"]` | CSS selectors of the SSO button (list; comma-separated in the env var) |
+| `session_source` | `JAMA_SESSION_SOURCE` | off (log in) | Reuse the browser's session: `firefox`, `chrome` or `edge` |
+| `browser_cookie_profile` | `JAMA_BROWSER_COOKIE_PROFILE` | main profile | Browser profile to read cookies from |
+| `browser_cookies_path` | `JAMA_BROWSER_COOKIES_PATH` | auto-detected | Override path to the cookie store / `User Data` dir |
 | `session_file` | `JAMA_SESSION_FILE` | `~/.jama/sessions/<hash>.json` | Session store file |
 | `login_debug_dir` | `JAMA_LOGIN_DEBUG_DIR` | off | Screenshots of each login step |
 | `session_keepalive_minutes` | `JAMA_SESSION_KEEPALIVE_MINUTES` | `0` (off) | MCP server only: one cheap request every N minutes |

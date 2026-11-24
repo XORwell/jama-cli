@@ -25,7 +25,7 @@ packages = [
     {include = "jama_cli"},
     {include = "jama_mcp_server"},  # Keep for backward compatibility
 ]
-include = ["NOTICE"]
+include = ["NOTICE", "jama_cli/core/jama_read_chrome_cookies.ps1"]
 
 [tool.poetry.dependencies]
 python = "^3.10"

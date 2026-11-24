@@ -22,6 +22,9 @@ SESSION_ENV_VARS = {
     "sso_selectors": "JAMA_SSO_SELECTORS",
     "login_debug_dir": "JAMA_LOGIN_DEBUG_DIR",
     "session_keepalive_minutes": "JAMA_SESSION_KEEPALIVE_MINUTES",
+    "session_source": "JAMA_SESSION_SOURCE",
+    "browser_cookie_profile": "JAMA_BROWSER_COOKIE_PROFILE",
+    "browser_cookies_path": "JAMA_BROWSER_COOKIES_PATH",
 }
 
 # Default config location
