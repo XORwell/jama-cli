@@ -11,8 +11,9 @@ Only the two cookies ``JSESSIONID`` and ``jama-csrf-token``, and only for the
 configured Jama host, are ever read. Their values are never logged or put into an
 exception message.
 
-Runtime target: CLI/MCP under Linux (WSL2), browser on the Windows host. The
-Windows file tree is reachable from WSL under ``/mnt/c/...``.
+Runtime target: CLI/MCP under Linux (WSL2), browser on the Windows host. WSL
+mounts the Windows drives into the Linux file tree; where exactly is read from
+``/proc/mounts`` (the mount root is configurable in ``/etc/wsl.conf``).
 
 Only **Firefox** is supported. It keeps cookie values in clear text, so
 everything happens by reading files; no Windows component, no decryption.
@@ -40,6 +41,7 @@ from __future__ import annotations
 import configparser
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -157,21 +159,70 @@ def in_wsl() -> bool:
         return False
 
 
-# Where WSL mounts the Windows system drive; the other drives are its siblings.
-WSL_WINDOWS_DRIVE = Path("/mnt/c")
 # A Windows user's Firefox directory, relative to the user's home.
 WINDOWS_FIREFOX_DIR = "AppData/Roaming/Mozilla/Firefox"
+# Where Windows keeps cmd.exe and the user homes, relative to a drive's root.
+_WINDOWS_CMD = "Windows/System32/cmd.exe"
+_WINDOWS_USERS = "Users"
+_PROC_MOUNTS = Path("/proc/mounts")
+_DRVFS_PATH = re.compile(r"(?:^|[;,])path=([A-Za-z]):\\")
 
 
-def _windows_userprofile() -> str | None:
+def _unescape_mount_point(field: str) -> str:
+    """Undo the octal escapes ``/proc/mounts`` uses for spaces and the like."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def windows_drive_mounts() -> dict[str, Path]:
+    """Windows drive letter (lower case) -> where WSL mounted it, read from ``/proc/mounts``."""
+    drives: dict[str, Path] = {}
+    try:
+        lines = _PROC_MOUNTS.read_text().splitlines()
+    except OSError:
+        return drives
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 4 or fields[2] not in ("9p", "drvfs"):
+            continue
+        options = fields[3]
+        if fields[2] == "9p" and "aname=drvfs" not in options:
+            continue
+        match = _DRVFS_PATH.search(options)
+        if match:
+            drives.setdefault(match.group(1).lower(), Path(_unescape_mount_point(fields[1])))
+    return drives
+
+
+def _windows_to_wsl_path(windows_path: str, drives: dict[str, Path]) -> Path | None:
+    """Translate ``X:\\dir\\...`` to a WSL path, with ``wslpath`` or the mount table."""
+    try:
+        out = subprocess.run(
+            ["wslpath", "-u", windows_path], capture_output=True, text=True, timeout=15
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return Path(out.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    root = drives.get(windows_path[0].lower())
+    if root is None:
+        return None
+    rest = windows_path[3:].replace("\\", "/")
+    return root / rest if rest else root
+
+
+def _windows_userprofile(drives: dict[str, Path]) -> str | None:
     """``%USERPROFILE%`` as Windows reports it, e.g. ``C:\\Users\\me``.
 
-    ``cmd.exe`` is tried from ``PATH`` first and then by its absolute path, because
-    WSL leaves the Windows directories off ``PATH`` with ``appendWindowsPath=false``
-    and an MCP client may start the server with a reduced environment.
+    ``cmd.exe`` is tried from ``PATH`` first and then inside each mounted Windows
+    drive, because WSL leaves the Windows directories off ``PATH`` with
+    ``appendWindowsPath=false`` and an MCP client may start the server with a
+    reduced environment.
     """
-    executables = ("cmd.exe", str(WSL_WINDOWS_DRIVE / "Windows/System32/cmd.exe"))
-    cwd = str(WSL_WINDOWS_DRIVE) if WSL_WINDOWS_DRIVE.is_dir() else None
+    executables = ["cmd.exe"]
+    executables += [
+        str(root / _WINDOWS_CMD) for root in drives.values() if (root / _WINDOWS_CMD).is_file()
+    ]
+    cwd = next((str(root) for root in drives.values() if root.is_dir()), None)
     for executable in executables:
         try:
             out = subprocess.run(
@@ -189,42 +240,42 @@ def _windows_userprofile() -> str | None:
     return None
 
 
-def _only_windows_user_with_firefox() -> Path | None:
-    """The one Windows user home under ``/mnt/c/Users`` that has a Firefox profile.
+def _only_windows_user_with_firefox(drives: dict[str, Path]) -> Path | None:
+    """The one Windows user home, on any mounted drive, that has a Firefox profile.
 
     Used when Windows programs cannot be started from WSL at all (interop off).
     With several such users there is no safe choice, so None is returned rather
     than reading another user's session.
     """
     homes: list[Path] = []
-    try:
-        entries = list((WSL_WINDOWS_DRIVE / "Users").iterdir())
-    except OSError:
-        return None
-    for entry in entries:
+    for root in drives.values():
         try:
-            if (entry / WINDOWS_FIREFOX_DIR / "profiles.ini").is_file():
-                homes.append(entry)
+            entries = list((root / _WINDOWS_USERS).iterdir())
         except OSError:
             continue
+        for entry in entries:
+            try:
+                if (entry / WINDOWS_FIREFOX_DIR / "profiles.ini").is_file():
+                    homes.append(entry)
+            except OSError:
+                continue
     return homes[0] if len(homes) == 1 else None
 
 
 def windows_user_home() -> Path | None:
-    """The Windows user's home as a WSL path (``/mnt/c/Users/<user>``), if found.
+    """The Windows user's home as a WSL path, if found.
 
     The Windows user name need not match the WSL one, so it is asked of Windows
     (``cmd.exe``) rather than guessed. Only if Windows cannot be asked, the single
     Windows user with a Firefox profile is used.
     """
-    profile = _windows_userprofile()
+    drives = windows_drive_mounts()
+    profile = _windows_userprofile(drives)
     if profile:
-        drive = profile[0].lower()
-        rest = profile[3:].replace("\\", "/")
-        path = WSL_WINDOWS_DRIVE.parent / drive / rest
-        if path.exists():
+        path = _windows_to_wsl_path(profile, drives)
+        if path is not None and path.exists():
             return path
-    home = _only_windows_user_with_firefox()
+    home = _only_windows_user_with_firefox(drives)
     if home is not None:
         logger.debug(
             "Windows could not be asked for the user profile; using the only one with Firefox"

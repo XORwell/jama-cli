@@ -127,8 +127,11 @@ shared session for the CLI too, by design.
 
 Firefox is looked for in the platform's profile directories (Windows `%APPDATA%`, macOS
 `~/Library/Application Support`, Linux classic, XDG, Snap and Flatpak). In WSL the Windows host's
-profile (`/mnt/c/Users/<windows-user>/...`, the Windows user resolved via `cmd.exe`, not guessed)
-and a Firefox inside WSL are both candidates; the most recently used profile wins.
+profile and a Firefox inside WSL are both candidates; the most recently used profile wins. No WSL
+path is hard-coded: the Windows drives and their mount points come from `/proc/mounts` (drvfs
+entries, `path=X:\`), `%USERPROFILE%` is asked of `cmd.exe` (from `PATH`, else from the mounted
+system drive) and translated with `wslpath`, falling back to the mount table. With interop off,
+only a single Windows user with a Firefox profile is accepted.
 
 Verified against a real Jama Cloud instance and Firefox on Windows (2026-11-24): `JSESSIONID`
 and `jama-csrf-token` are session cookies, and Firefox never writes session cookies to

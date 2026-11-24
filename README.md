@@ -176,7 +176,7 @@ evicted.
 jama login --from-browser firefox     # read the session from Firefox
 # optional: a non-default Firefox profile, or an explicit cookie-store path
 jama login --from-browser firefox --browser-cookie-profile "abcd1234.default-release"
-jama login --from-browser firefox --browser-cookies-path "/mnt/c/Users/me/AppData/Roaming/Mozilla/Firefox"
+jama login --from-browser firefox --browser-cookies-path "<dir with profiles.ini>"
 ```
 
 `--from-browser` applies to that one call. The stored session remembers that it came from
@@ -191,10 +191,12 @@ you sign out there, the shared session ends for the CLI too (that coupling is th
 **Where Firefox is looked for.** Windows: `%APPDATA%\Mozilla\Firefox`. macOS:
 `~/Library/Application Support/Firefox`. Linux: `~/.mozilla/firefox`, `~/.config/mozilla/firefox`,
 Snap (`~/snap/firefox/common/.mozilla/firefox`) and Flatpak
-(`~/.var/app/org.mozilla.firefox/.mozilla/firefox`). In WSL the Windows host's Firefox
-(`/mnt/c/Users/<windows-user>/...`, the Windows user is asked of Windows, not guessed) and a
+(`~/.var/app/org.mozilla.firefox/.mozilla/firefox`). In WSL the Windows host's Firefox and a
 Firefox inside WSL are both considered; with several installs the most recently used profile wins.
-`--browser-cookies-path` overrides all of this.
+For the Windows side the Windows user is asked of Windows (`cmd.exe`, also when Windows is not on
+`PATH`), not guessed, and the drives are located through `/proc/mounts`, so a custom automount
+root in `/etc/wsl.conf` works. With interop off, the single Windows user that has a Firefox
+profile is used; with several, none is picked. `--browser-cookies-path` overrides all of this.
 
 **Where the cookies are.** Jama's `JSESSIONID` and `jama-csrf-token` are session cookies, and
 Firefox never writes session cookies to `cookies.sqlite`. While Firefox runs they are only in its
