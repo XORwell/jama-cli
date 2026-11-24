@@ -66,6 +66,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- Test run results per step were written to the wrong key. Jama stores a step's actual
+  results under `result`; a step key `actualResults` is accepted and silently dropped, so
+  `testruns set-actual --step`, `testruns add-screenshot --step` and the MCP tools failed on
+  every freshly generated run ("did not store"). Steps are now written as `result`;
+  `actualResults` on a step is only read as a fallback, and `update_test_run` writes it as
+  `result` with a warning
+- Test run field names and writability are read from the instance's test run item type
+  (`typeKey` `TSTRN`) instead of constants, so fields with a `$<typeId>` suffix work, and a
+  field that Jama leaves out of a GET because it is empty is treated as empty
+- `update_test_run` now fails when Jama did not store a step value that was sent
 - `jama logout` and the MCP tool `logout_session` no longer sign the user out in the browser
   when the session was taken over with `--from-browser`: only the stored copy is removed. New
   flag `jama logout --end-server-session` and tool parameter `end_server_session` end it on the

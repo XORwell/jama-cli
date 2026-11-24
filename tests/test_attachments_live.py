@@ -28,7 +28,7 @@ from jama_cli.core.api import JamaApi
 from jama_cli.core.attachments import AttachmentService
 from jama_cli.core.http_client import JamaHttpClient
 from jama_cli.core.session import SessionManager, SessionSettings
-from jama_cli.core.testruns import TestRunService, run_fields, run_steps, step_actual_results_field
+from jama_cli.core.testruns import STEP_RESULT_KEY, TestRunService, run_fields, run_steps
 
 # A valid 1x1 PNG.
 TINY_PNG = base64.b64decode(
@@ -91,7 +91,7 @@ async def test_screenshot_in_test_run_step_loads_through_files_endpoint() -> Non
 
         before = run_fields(await api.get_test_run(test_run_id))
         steps_before = run_steps(before)
-        name = step_actual_results_field(steps_before)
+        name = STEP_RESULT_KEY
 
         result = await runs.attach_screenshots_to_test_run(
             test_run_id,

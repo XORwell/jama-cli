@@ -670,7 +670,10 @@ class JamaStdioMCPServer:
                         "status or result). The given values are merged into the current "
                         "run, so steps and fields that are not named are kept. In "
                         "data.fields.testRunSteps entry N updates step N ({} or null leaves "
-                        "a step alone); or use step + step_fields to update one step."
+                        "a step alone); or use step + step_fields to update one step. The "
+                        "actual results of a step are its key 'result' (a step key "
+                        "'actualResults' is written as 'result'); the update fails if Jama "
+                        "did not store a step value."
                     ),
                     inputSchema={
                         "type": "object",
@@ -687,7 +690,10 @@ class JamaStdioMCPServer:
                             },
                             "step_fields": {
                                 "type": "object",
-                                "description": 'Keys to set on that step, e.g. {"status": "PASSED"}',
+                                "description": (
+                                    'Keys to set on that step, e.g. {"status": "PASSED"} or '
+                                    '{"result": "<p>...</p>"}'
+                                ),
                             },
                         },
                         "required": ["test_run_id"],

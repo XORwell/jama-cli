@@ -162,8 +162,10 @@ def set_actual(
 ) -> None:
     """Write the actual results of a test run or of one of its steps.
 
-    Appends to the existing content unless --replace is given. Other steps,
-    their statuses and all other fields stay as they are.
+    Without --step this is the run-level "Actual results" field; with --step N
+    it is the "Result" column of that step. Appends to the existing content
+    unless --replace is given. Other steps, their statuses and all other fields
+    stay as they are.
     """
     profile = get_profile_or_env(ctx.obj.get("profile") if ctx.obj else None)
 

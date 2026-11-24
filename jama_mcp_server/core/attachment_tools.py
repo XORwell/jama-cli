@@ -49,7 +49,11 @@ def tool_definitions() -> list[Tool]:
     return [
         Tool(
             name="get_test_run",
-            description="Get a test run with its steps, statuses and actual results",
+            description=(
+                "Get a test run with its steps, statuses and actual results. Jama leaves "
+                "empty fields out: a run without 'actualResults', or a step without "
+                "'result' (the step's actual results), has none yet."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -92,7 +96,8 @@ def tool_definitions() -> list[Tool]:
             name="attach_screenshot_to_test_run",
             description=(
                 "Modifies Jama: uploads one or more images as attachments and embeds them in "
-                "the 'Actual results' of a test run, or of one step when step is given. The "
+                "the 'Actual results' of a test run, or in the 'result' of one step when "
+                "step is given. The "
                 "images are APPENDED; existing content, other steps and step statuses are kept. "
                 "Give file_path, file_paths, content_base64 + file_name, or files."
             ),

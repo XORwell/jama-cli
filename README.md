@@ -448,6 +448,10 @@ jama testruns set-actual 1234 --file result.html --step 3
 jama testruns set-actual 1234 --html "<p>Retested</p>" --step 3 --replace
 ```
 
+Without `--step` the run-level "Actual results" field is written; with `--step N` the
+"Result" column of that step (the step key `result` in the REST API). Field names are read
+from the instance's test run item type.
+
 These commands change a test run with a read-modify-write: the run is read, only
 the targeted field is changed, the complete step list is sent back, and the run is
 read again to check that the other steps, their statuses and the existing HTML are

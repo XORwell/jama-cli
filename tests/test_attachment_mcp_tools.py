@@ -130,8 +130,8 @@ class TestAttachScreenshotTool:
         steps = fake.test_runs[RUN]["fields"]["testRunSteps"]
         url = f"{fake.base}/attachment/9000/remote.png"
         assert result["embedded"] == [url]
-        assert steps[1]["actualResults"].startswith("<p>Error 500</p><p>After login</p>")
-        assert url in steps[1]["actualResults"]
+        assert steps[1]["result"].startswith("<p>Error 500</p><p>After login</p>")
+        assert url in steps[1]["result"]
         assert steps[0] == before["testRunSteps"][0]
         assert steps[2] == before["testRunSteps"][2]
 
