@@ -663,42 +663,6 @@ class JamaStdioMCPServer:
                         "required": ["testplan_id", "name", "start_date", "end_date"],
                     },
                 ),
-                Tool(
-                    name="update_test_run",
-                    description=(
-                        "Modifies Jama: partial update of a test run (e.g. set a step's "
-                        "status or result). The given values are merged into the current "
-                        "run, so steps and fields that are not named are kept. In "
-                        "data.fields.testRunSteps entry N updates step N ({} or null leaves "
-                        "a step alone); or use step + step_fields to update one step. The "
-                        "actual results of a step are its key 'result' (a step key "
-                        "'actualResults' is written as 'result'); the update fails if Jama "
-                        "did not store a step value."
-                    ),
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "test_run_id": {"type": "integer", "description": "Test run ID"},
-                            "data": {
-                                "type": "object",
-                                "description": 'Fields to update: {"fields": {...}}',
-                            },
-                            "step": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "description": "Step number, from 1 (with step_fields)",
-                            },
-                            "step_fields": {
-                                "type": "object",
-                                "description": (
-                                    'Keys to set on that step, e.g. {"status": "PASSED"} or '
-                                    '{"result": "<p>...</p>"}'
-                                ),
-                            },
-                        },
-                        "required": ["test_run_id"],
-                    },
-                ),
                 *attachment_tools.tool_definitions(),
                 Tool(
                     name="get_session_status",

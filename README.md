@@ -512,6 +512,32 @@ curl http://localhost:8000/health
 open http://localhost:8000/api/docs    # Swagger UI
 ```
 
+The attachment and test run tools (`get_test_run`, `update_test_run`, `upload_attachment`,
+`attach_screenshot_to_test_run`, `download_attachment`) are the same in both server modes;
+they come from one shared registry. In HTTP mode, list them with `GET /v1/tools` and call
+one with `POST /v1/invoke`:
+
+```bash
+curl -s http://localhost:8000/v1/tools
+curl -s http://localhost:8000/v1/invoke -H 'Content-Type: application/json' -d '{
+  "prompt": "upload_attachment",
+  "parameters": {"intent": "upload_attachment", "item_id": 456,
+                 "file_name": "shot.png", "content_base64": "<base64>"}
+}'
+```
+
+Over HTTP, files are sent as `content_base64` + `file_name`, and a download without
+`output_path` comes back as base64. File paths on the server's machine (`file_path`,
+`file_paths`, `output_path`) are refused by default. To accept them, start the server with one
+directory they are confined to:
+
+```bash
+jama serve --allow-local-paths --local-path-dir /srv/jama-exchange
+# or: JAMA_MCP_ALLOW_LOCAL_PATHS=1 JAMA_MCP_LOCAL_PATH_DIR=/srv/jama-exchange jama serve
+```
+
+The stdio server runs on your own machine and accepts paths as before.
+
 ### Available Operations
 
 The MCP server exposes 70 Jama API operations:

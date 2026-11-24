@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- HTTP-mode MCP server: the attachment and test run tools (`get_test_run`,
+  `update_test_run`, `upload_attachment`, `attach_screenshot_to_test_run`,
+  `download_attachment`) are available there too, from the same registry the stdio server
+  uses. `GET /v1/tools` lists them; call one with `POST /v1/invoke` and
+  `parameters.intent`. Over HTTP files are sent as base64; file paths are refused unless
+  the server is started with `--allow-local-paths --local-path-dir DIR`
+  (`JAMA_MCP_ALLOW_LOCAL_PATHS`, `JAMA_MCP_LOCAL_PATH_DIR`) and are then confined to that
+  directory
 - Reuse the session from the user's own Firefox instead of a second login:
   `jama login --from-browser firefox` (or `session_source` / `JAMA_SESSION_SOURCE`).
   Reads only the `JSESSIONID` and `jama-csrf-token` cookies for the configured host, so browser,

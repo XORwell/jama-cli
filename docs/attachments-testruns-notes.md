@@ -33,6 +33,16 @@ CLI (jama_cli/commands/attachments.py, testruns.py)      MCP (jama_mcp_server/co
 - `jama_cli/core/testruns.py` holds the read-modify-write logic for test runs.
 - The CLI and the MCP server are thin layers over these two services, so both
   behave the same.
+- The MCP tool definitions and handlers live in one registry,
+  `jama_mcp_server/core/attachment_tools.py`. The stdio server lists and dispatches them;
+  the HTTP server serves the same definitions under `GET /v1/tools` and dispatches the same
+  handlers for `POST /v1/invoke` with `parameters.intent` set to the tool name. Neither
+  server defines these tools itself.
+- File input depends on the transport (`FileAccessPolicy`). Under stdio a path on the
+  server's machine is accepted. Over HTTP files are sent as `content_base64` + `file_name`;
+  paths (`file_path`, `file_paths`, `output_path`) are refused unless the server was started
+  with `--allow-local-paths --local-path-dir DIR`, and are then confined to that directory
+  after resolving symlinks and `..`.
 - File content is always passed as `bytes`, so a request can be sent again after
   the HTTP client repaired a session.
 - All URLs are built from the configured base URL (`JamaHttpClient.base_url`),
@@ -208,7 +218,5 @@ Use a scratch project and a scratch test run.
 
 ## Not done
 
-- The HTTP-mode MCP server (`jama_mcp_server/core/server.py`) was not changed; the new
-  tools exist in the stdio server only.
 - No retry and no rollback: if the embed URL check fails after the upload, the
   attachment that was just created stays in Jama.
