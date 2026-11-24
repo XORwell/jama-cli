@@ -61,7 +61,7 @@ def tool_definitions() -> list[Tool]:
         Tool(
             name="upload_attachment",
             description=(
-                "MODIFIES JAMA: uploads a file as a new attachment and links it to an item "
+                "Modifies Jama: uploads a file as a new attachment and links it to an item "
                 "(it shows on the item's Attachments tab). Returns the attachment id, the "
                 "stored file's id and the embed URL to use for an inline image. Give either "
                 "file_path or content_base64 + file_name."
@@ -91,7 +91,7 @@ def tool_definitions() -> list[Tool]:
         Tool(
             name="attach_screenshot_to_test_run",
             description=(
-                "MODIFIES JAMA: uploads one or more images as attachments and embeds them in "
+                "Modifies Jama: uploads one or more images as attachments and embeds them in "
                 "the 'Actual results' of a test run, or of one step when step is given. The "
                 "images are APPENDED; existing content, other steps and step statuses are kept. "
                 "Give file_path, file_paths, content_base64 + file_name, or files."
@@ -185,7 +185,10 @@ class AttachmentTools:
     @classmethod
     def for_api(cls, api: JamaApi) -> AttachmentTools:
         """Handlers with the default local upload map for this Jama instance."""
-        return cls(api, UploadCache(default_upload_cache_path(api.base_url)))
+        base_url = api.base_url
+        if not isinstance(base_url, str):
+            return cls(api)
+        return cls(api, UploadCache(default_upload_cache_path(base_url)))
 
     async def call(self, name: str, arguments: dict[str, Any]) -> Any:
         if name == "get_test_run":
@@ -197,6 +200,8 @@ class AttachmentTools:
         if name == "download_attachment":
             return await self._download(arguments)
         if name == "update_test_run":
+            if not arguments.get("data") and not arguments.get("step_fields"):
+                raise ValueError("Give data, or step + step_fields")
             return await self.test_runs.update_test_run(
                 arguments["test_run_id"],
                 arguments.get("data"),

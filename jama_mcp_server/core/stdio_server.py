@@ -666,7 +666,7 @@ class JamaStdioMCPServer:
                 Tool(
                     name="update_test_run",
                     description=(
-                        "MODIFIES JAMA: partial update of a test run (e.g. set a step's "
+                        "Modifies Jama: partial update of a test run (e.g. set a step's "
                         "status or result). The given values are merged into the current "
                         "run, so steps and fields that are not named are kept. In "
                         "data.fields.testRunSteps entry N updates step N ({} or null leaves "

@@ -53,7 +53,7 @@ class TestToolDefinitions:
     def test_write_tools_say_that_they_modify_jama(self, server: JamaStdioMCPServer) -> None:
         tools = {tool.name: tool for tool in attachment_tools.tool_definitions()}
         for name in ("upload_attachment", "attach_screenshot_to_test_run"):
-            assert "MODIFIES JAMA" in (tools[name].description or "")
+            assert "Modifies Jama" in (tools[name].description or "")
         assert "Does not modify Jama" in (tools["download_attachment"].description or "")
 
     async def test_tools_are_listed_once(self, server: JamaStdioMCPServer) -> None:
@@ -67,7 +67,7 @@ class TestToolDefinitions:
         for name in (*WRITE_TOOLS, "download_attachment", "get_test_run", "get_attachment"):
             assert name in names
         update = next(tool for tool in listed if tool.name == "update_test_run")
-        assert "MODIFIES JAMA" in (update.description or "")
+        assert "Modifies Jama" in (update.description or "")
 
 
 class TestUploadAttachmentTool:
