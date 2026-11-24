@@ -12,7 +12,13 @@ import typer
 from jama_cli.config import get_profile_or_env
 from jama_cli.core.session import SessionManager
 from jama_cli.models import JamaProfile
-from jama_cli.output import OutputFormat, format_single_item, print_error, print_success
+from jama_cli.output import (
+    OutputFormat,
+    format_single_item,
+    print_error,
+    print_success,
+    print_warning,
+)
 
 
 def _session_profile(ctx: typer.Context) -> JamaProfile:
@@ -153,19 +159,43 @@ def login(
     print_success(f"Logged in to {settings.base_url} as {session.username or 'unknown user'}")
 
 
-def logout(ctx: typer.Context) -> None:
-    """Log out of Jama, release the license seat and delete the stored session."""
+def logout(
+    ctx: typer.Context,
+    end_server_session: Annotated[
+        bool,
+        typer.Option(
+            "--end-server-session",
+            help="Also end a session that was taken over from your browser "
+            "(--from-browser). This signs you out in the browser too.",
+        ),
+    ] = False,
+) -> None:
+    """Log out of Jama and delete the stored session.
+
+    A session from `jama login` is ended on the server, which releases the
+    license seat. A session taken over with `--from-browser` is your browser's
+    own session, so only the stored copy is removed and the browser stays
+    signed in, unless you pass --end-server-session.
+    """
     profile = _session_profile(ctx)
+    manager = SessionManager(profile.session_settings())
     try:
-        had_session = asyncio.run(SessionManager(profile.session_settings()).logout())
+        # None keeps the default per session source; the flag can only add the
+        # server logout, never suppress it for a session this tool logged in.
+        result = asyncio.run(manager.logout(True if end_server_session else None))
     except Exception as e:
         print_error(f"Logout failed (the stored session was removed anyway): {e}")
         raise typer.Exit(1) from e
 
-    if had_session:
+    if not result.had_session:
+        print_success("No stored session")
+    elif not result.server_session_ended:
+        print_success("Removed the stored session; your browser session is still active")
+    elif result.source and result.source.startswith("browser-"):
+        print_warning("The session was shared with your browser: you are signed out there too.")
         print_success("Logged out and removed the stored session")
     else:
-        print_success("No stored session")
+        print_success("Logged out and removed the stored session")
 
 
 def status(ctx: typer.Context) -> None:
@@ -187,6 +217,7 @@ def status(ctx: typer.Context) -> None:
         "base_url": info["base_url"],
         "logged_in": info["logged_in"],
         "username": info["username"] or "-",
+        "source": info["source"] or "-",
         "age": _format_age(info["age_seconds"]),
         "created": _format_time(info["created_at"]),
         "last_validated": _format_time(info["last_validated_at"]),

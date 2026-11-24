@@ -16,10 +16,20 @@ One JSON file per `(base_url, account)`: `~/.jama/sessions/<sha256(base_url|acco
   "username": "from users/current",
   "cookies": [{"name": "...", "value": "...", "domain": "...", "path": "..."}],
   "csrf_token": "...",
+  "source": "login",
   "created_at": 0.0,
   "last_validated_at": 0.0
 }
 ```
+
+`source` records where the session came from: `login` (this tool's browser login), `form`
+(native form login) or `browser-firefox` (taken over from the user's Firefox). Files written
+before the key existed are read as `login`.
+
+Logout depends on it. A `login` or `form` session is ended on the server with `logout.req`
+(plus the CSRF header) and the file is deleted. A `browser-*` session is the user's own browser
+session, so only the file is deleted; `jama logout --end-server-session` / the MCP parameter
+`end_server_session: true` end it on the server on purpose, which signs the browser out too.
 
 All cookies that apply to the base URL are kept, not only the two Jama ones, because load
 balancers in front of Jama may need their own. Mode 0600 (Windows: ACL reduced to the current

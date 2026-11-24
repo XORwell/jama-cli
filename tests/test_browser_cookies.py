@@ -6,8 +6,10 @@ is needed. Chrome and Edge are not supported and must be refused.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -288,3 +290,194 @@ class TestBrowserLoginPath:
 
     def test_only_firefox_is_supported(self) -> None:
         assert set(BROWSERS) == {"firefox"}
+
+
+# ---------------------------------------------------------------------------
+# Logout: a browser-sourced session is the browser's own session
+# ---------------------------------------------------------------------------
+
+
+LOGOUT = ("GET", "/contour/logout.req")
+
+
+class TestLogoutSparesTheBrowser:
+    @pytest.fixture
+    def settings(self, tmp_path: Path) -> SessionSettings:
+        return SessionSettings(
+            base_url=BASE,
+            session_source="firefox",
+            browser_cookies_path=tmp_path / "ff" / "cookies.sqlite",
+            session_file=tmp_path / "sessions" / "s.json",
+        )
+
+    async def _browser_login(self, fake: FakeJama, settings: SessionSettings) -> tuple[Any, str]:
+        sid, csrf = fake.plant_session("alice")
+        db = settings.browser_cookies_path
+        assert db is not None
+        db.parent.mkdir(parents=True, exist_ok=True)
+        make_firefox_db(db, [("JSESSIONID", sid, HOST), ("jama-csrf-token", csrf, HOST)])
+        manager = SessionManager(settings, transport=fake.transport())
+        await manager.login()
+        return manager, sid
+
+    async def test_source_is_stored_in_the_session_file(self, settings: SessionSettings) -> None:
+        fake = FakeJama()
+        await self._browser_login(fake, settings)
+
+        assert json.loads(settings.store_path.read_text())["source"] == "browser-firefox"
+        stored = SessionStore(settings.store_path).load()
+        assert stored is not None and stored.from_browser
+
+    async def test_logout_removes_only_the_local_entry(self, settings: SessionSettings) -> None:
+        fake = FakeJama()
+        manager, sid = await self._browser_login(fake, settings)
+
+        result = await manager.logout()
+
+        assert result.had_session and result.source == "browser-firefox"
+        assert result.server_session_ended is False
+        assert LOGOUT not in fake.requests
+        assert fake.is_authenticated(sid)  # the browser is still signed in
+        assert not settings.store_path.exists()
+
+    async def test_end_server_session_calls_logout_with_the_csrf_header(
+        self, settings: SessionSettings
+    ) -> None:
+        fake = FakeJama()
+        manager, sid = await self._browser_login(fake, settings)
+
+        result = await manager.logout(end_server_session=True)
+
+        assert result.server_session_ended is True
+        assert fake.requests.count(LOGOUT) == 1
+        # The fake only ends a session when logout.req carries the CSRF header.
+        assert not fake.is_authenticated(sid)
+        assert not settings.store_path.exists()
+
+    async def test_source_survives_a_token_repair(self, settings: SessionSettings) -> None:
+        fake = FakeJama()
+        manager, _sid = await self._browser_login(fake, settings)
+        data = json.loads(settings.store_path.read_text())
+        data["csrf_token"] = "wrong-token"
+        settings.store_path.write_text(json.dumps(data))
+
+        from jama_cli.core.http_client import JamaHttpClient
+
+        fresh = SessionManager(settings, transport=fake.transport())
+        async with JamaHttpClient(BASE, session=fresh, transport=fake.transport()) as client:
+            await client.get("items/1")
+
+        stored = SessionStore(settings.store_path).load()
+        assert stored is not None and stored.source == "browser-firefox"
+
+    def test_cli_logout_messages(
+        self, settings: SessionSettings, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        from typer.testing import CliRunner
+
+        from jama_cli.commands import auth
+        from jama_cli.main import app
+
+        fake = FakeJama()
+        for name in ("JAMA_API_KEY", "JAMA_CLIENT_ID", "JAMA_USERNAME", "JAMA_SESSION_SOURCE"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("JAMA_URL", BASE)
+        monkeypatch.setenv("JAMA_AUTH_TYPE", "session")
+        monkeypatch.setattr(
+            auth,
+            "SessionManager",
+            lambda _settings: SessionManager(settings, transport=fake.transport()),
+        )
+        runner = CliRunner()
+
+        _manager, sid = asyncio.run(self._browser_login(fake, settings))
+        result = runner.invoke(app, ["logout"])
+        assert result.exit_code == 0
+        assert "your browser session is still active" in " ".join(result.output.split())
+        assert fake.is_authenticated(sid)
+        assert LOGOUT not in fake.requests
+
+        _manager, sid = asyncio.run(self._browser_login(fake, settings))
+        result = runner.invoke(app, ["logout", "--end-server-session"])
+        assert result.exit_code == 0
+        assert "signed out there too" in " ".join(result.output.split())
+        assert not fake.is_authenticated(sid)
+
+    async def test_mcp_logout_tool_follows_the_same_rule(self, settings: SessionSettings) -> None:
+        from jama_mcp_server.core.stdio_server import JamaStdioMCPServer
+        from jama_mcp_server.models import JamaConfig
+
+        fake = FakeJama()
+        _manager, sid = await self._browser_login(fake, settings)
+        server = JamaStdioMCPServer(JamaConfig(url=BASE, api_key="unused"), settings)
+        manager = SessionManager(settings, transport=fake.transport())
+        server._session = manager
+        server._api = object()  # type: ignore[assignment]
+
+        result = await server._execute_tool("logout_session", {})
+        assert result["server_session_ended"] is False
+        assert result["browser_session_still_active"] is True
+        assert result["source"] == "browser-firefox"
+        assert fake.is_authenticated(sid)
+        assert LOGOUT not in fake.requests
+        for secret in fake.live_secrets():
+            assert secret not in json.dumps(result)
+
+        _manager, sid = await self._browser_login(fake, settings)
+        result = await server._execute_tool("logout_session", {"end_server_session": True})
+        assert result["server_session_ended"] is True
+        assert result["browser_session_still_active"] is False
+        assert not fake.is_authenticated(sid)
+
+
+class TestLoginSourcedLogoutIsUnchanged:
+    async def test_form_session_is_ended_on_the_server(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        settings = SessionSettings(
+            base_url=BASE,
+            username="alice",
+            password="s3cret-pw-alice",
+            login_mode="form",
+            session_file=tmp_path / "s.json",
+        )
+        manager = SessionManager(settings, transport=fake.transport())
+        session = await manager.login()
+        sid = session.cookie_value("JSESSIONID") or ""
+        assert json.loads(settings.store_path.read_text())["source"] == "form"
+
+        result = await manager.logout()
+
+        assert result.server_session_ended is True
+        assert fake.requests.count(LOGOUT) == 1
+        assert not fake.is_authenticated(sid)
+
+    async def test_old_session_file_without_source_is_a_login_session(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        sid, csrf = fake.plant_session("alice")
+        path = tmp_path / "old.json"
+        # The format written before the "source" key existed.
+        path.write_text(
+            json.dumps(
+                {
+                    "base_url": BASE,
+                    "username": "alice",
+                    "cookies": [
+                        {"name": "JSESSIONID", "value": sid, "domain": HOST, "path": "/"},
+                        {"name": "jama-csrf-token", "value": csrf, "domain": HOST, "path": "/"},
+                    ],
+                    "csrf_token": csrf,
+                    "created_at": 1.0,
+                    "last_validated_at": 2.0,
+                }
+            )
+        )
+        stored = SessionStore(path).load()
+        assert stored is not None
+        assert stored.source == "login" and not stored.from_browser
+
+        settings = SessionSettings(base_url=BASE, session_file=path)
+        result = await SessionManager(settings, transport=fake.transport()).logout()
+        assert result.server_session_ended is True
+        assert not fake.is_authenticated(sid)

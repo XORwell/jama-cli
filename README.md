@@ -145,6 +145,7 @@ or with environment variables: `JAMA_URL=... JAMA_AUTH_TYPE=session`.
 jama login      # Log in and store the session
 jama status     # Base URL, user, age, last validation, and whether the session is valid right now
 jama logout     # Log out on the server (releases the license seat) and delete the stored session
+                # (a session taken over with --from-browser is only removed locally, see below)
 ```
 
 `jama login` options: `--mode browser|form`, `--browser-channel`, `--browser-profile-dir`,
@@ -187,6 +188,11 @@ you sign out there, the shared session ends for the CLI too (that coupling is th
 the two Jama cookies, and only for your configured host, are ever read; the copied database file
 is deleted right after reading. Firefox keeps cookie values in clear text, so this is a plain
 file read inside WSL with no Windows component.
+
+**Logout.** A session taken over from Firefox *is* your browser's session. `jama logout` therefore
+only removes the stored copy and tells you so ("Removed the stored session; your browser session
+is still active"). `jama logout --end-server-session` really ends it on the server, which also
+signs you out in the browser. `jama status` shows where the stored session came from (`source`).
 
 **Only Firefox is supported.** Chrome and Edge (version 127 and later) bind the cookie key to
 the Windows user with App-Bound Encryption. Getting around that from outside the browser is what
@@ -244,7 +250,8 @@ Environment variables override the profile.
 
 `jama serve --stdio` supports session auth (the HTTP server mode does not). Two extra tools are
 available: `get_session_status` (never returns cookies or tokens) and `logout_session` (releases
-the seat). All logs go to stderr; stdout carries only the MCP protocol.
+the seat; for a session taken over from the browser it only removes the stored copy unless
+`end_server_session` is true). All logs go to stderr; stdout carries only the MCP protocol.
 
 ```json
 {

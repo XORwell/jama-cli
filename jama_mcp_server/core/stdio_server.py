@@ -706,11 +706,27 @@ class JamaStdioMCPServer:
                 Tool(
                     name="logout_session",
                     description=(
-                        "Log out of Jama and delete the stored login session "
-                        "(auth_type=session). Releases the license seat. The next "
-                        "request needs a new login."
+                        "Delete the stored login session (auth_type=session). A session "
+                        "this tool logged in itself is also ended on the Jama server, which "
+                        "releases the license seat. A session taken over from the user's "
+                        "browser (session source 'browser-firefox') is only removed locally "
+                        "by default, because ending it would sign the user out in the "
+                        "browser. The next request needs a new login."
                     ),
-                    inputSchema={"type": "object", "properties": {}},
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "end_server_session": {
+                                "type": "boolean",
+                                "description": (
+                                    "End the session on the Jama server. Default: true for "
+                                    "a session this tool logged in, false for a session "
+                                    "taken over from the browser. Setting it to true for a "
+                                    "browser session also signs the user out in the browser."
+                                ),
+                            }
+                        },
+                    },
                 ),
             ]
 
@@ -744,8 +760,18 @@ class JamaStdioMCPServer:
         elif name == "logout_session":
             if not self._session:
                 raise ValueError("logout_session only applies to auth_type=session")
-            had_session = await self._session.logout()
-            return {"logged_out": True, "had_session": had_session}
+            outcome = await self._session.logout(arguments.get("end_server_session"))
+            return {
+                "logged_out": True,
+                "had_session": outcome.had_session,
+                "source": outcome.source,
+                "server_session_ended": outcome.server_session_ended,
+                "browser_session_still_active": bool(
+                    outcome.had_session
+                    and not outcome.server_session_ended
+                    and (outcome.source or "").startswith("browser-")
+                ),
+            }
 
         elif name == "get_projects":
             return await api.get_projects()

@@ -31,6 +31,12 @@ from jama_cli.core.exceptions import CoreException
 SESSION_COOKIE = "JSESSIONID"
 CSRF_COOKIE = "jama-csrf-token"
 
+# Where a stored session came from. A browser-sourced session *is* the user's
+# browser session, so it must not be ended on the server by a plain logout.
+SOURCE_LOGIN = "login"  # this tool's own browser (Playwright) login
+SOURCE_FORM = "form"  # this tool's native form login
+SOURCE_BROWSER_PREFIX = "browser-"  # e.g. "browser-firefox": read from the user's browser
+
 # How often a waiting process re-checks the lock.
 _LOCK_POLL_SECONDS = 0.1
 
@@ -73,6 +79,12 @@ class StoredSession:
     csrf_token: str = field(default="", repr=False)
     created_at: float = 0.0
     last_validated_at: float = 0.0
+    source: str = SOURCE_LOGIN
+
+    @property
+    def from_browser(self) -> bool:
+        """True if the session was taken over from the user's own browser."""
+        return self.source.startswith(SOURCE_BROWSER_PREFIX)
 
     def cookie_header(self) -> str:
         """Value for the ``Cookie`` request header."""
@@ -144,6 +156,7 @@ class StoredSession:
             "csrf_token": self.csrf_token,
             "created_at": self.created_at,
             "last_validated_at": self.last_validated_at,
+            "source": self.source,
         }
 
     @classmethod
@@ -163,6 +176,8 @@ class StoredSession:
             csrf_token=str(data.get("csrf_token", "")),
             created_at=float(data.get("created_at", 0.0)),
             last_validated_at=float(data.get("last_validated_at", 0.0)),
+            # Files written before the key existed came from this tool's own login.
+            source=str(data.get("source") or SOURCE_LOGIN),
         )
 
 

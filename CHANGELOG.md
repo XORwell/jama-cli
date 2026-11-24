@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- `jama logout` and the MCP tool `logout_session` no longer sign the user out in the browser
+  when the session was taken over with `--from-browser`: only the stored copy is removed. New
+  flag `jama logout --end-server-session` and tool parameter `end_server_session` end it on the
+  server on purpose. The session file records where a session came from (`source`: `login`,
+  `form` or `browser-firefox`; files without the key count as `login`), and `jama status`
+  shows it. Sessions from `jama login` are ended on the server as before
 - Session auth: a wrong or missing CSRF token is repaired silently for every HTTP method.
   Jama checks the token on reads too and answers 401 "CSRF Exception"; this was taken for a
   dead session and led to an unnecessary login (or a failure with `login_interactive: never`)
