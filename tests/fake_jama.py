@@ -75,7 +75,7 @@ class FakeJama:
         with self._lock:
             values = list(self.sessions.keys())
             values += [s["csrf"] for s in self.sessions.values()]
-        return values + list(self.users.values())
+        return [v for v in values + list(self.users.values()) if v]
 
     def is_authenticated(self, jsessionid: str) -> bool:
         with self._lock:

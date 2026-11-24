@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Browser-session ("SSO cookie") auth mode, `auth_type: session` / `JAMA_AUTH_TYPE=session`:
+  log in once in a real browser (or with the native login form) and work as yourself, with
+  your own Jama permissions, without API credentials
+  - New commands `jama login`, `jama logout`, `jama status`
+  - Session store shared by all processes (`~/.jama/sessions/`, mode 0600, file lock, atomic
+    writes), so terminals, IDE windows and MCP servers reuse one session instead of
+    invalidating each other's
+  - Persistent browser profile for silent re-login; no idle logout
+  - Automatic recovery: CSRF token refresh for writes, pick-up of a session renewed by another
+    process, and a single locked re-login
+  - `login_interactive` setting (`auto` | `always` | `never`) and optional keepalive
+  - stdio MCP server: session auth plus `get_session_status` and `logout_session` tools
+  - Playwright is an optional extra: `pip install "jama-cli[browser]"`
+- New dependency: `filelock`
+
 ## [0.1.4] - 2026-04-21
 
 ### Added
