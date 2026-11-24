@@ -184,7 +184,6 @@ class FakeJamaAttachments:
 
         self.items: dict[int, dict[str, Any]] = {
             10: {"id": 10, "project": 3, "fields": {"name": "Requirement"}},
-            77: {"id": 77, "project": 3, "fields": {"name": "Login works"}},
         }
         self.test_runs: dict[int, dict[str, Any]] = {
             77: default_test_run(),
@@ -367,6 +366,9 @@ class FakeJamaAttachments:
 
         if segments[0] == "items" and len(segments) >= 2:
             item_id = int(segments[1])
+            # Test runs are not items: every items/{testRunId}/... answers 404.
+            if item_id in self.test_runs:
+                return self._error(404, f"Item with ID {item_id} does not exist")
             if len(segments) == 2 and method == "GET":
                 if item_id not in self.items:
                     return self._error(404, "Item not found")

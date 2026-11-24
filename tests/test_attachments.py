@@ -24,7 +24,11 @@ from jama_cli.core.attachments import (
     screenshot_block_html,
 )
 from jama_cli.core.client import JamaClient
-from jama_cli.core.exceptions import APIClientException, UnauthorizedException
+from jama_cli.core.exceptions import (
+    APIClientException,
+    ResourceNotFoundException,
+    UnauthorizedException,
+)
 from jama_cli.core.http_client import JamaHttpClient
 from jama_cli.core.session import LOGIN_HINT, SessionManager, SessionSettings
 from jama_cli.core.session_store import SessionStore, StoredSession
@@ -307,12 +311,13 @@ class TestUploadCache:
     async def test_cached_upload_is_linked_to_another_item(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
     ) -> None:
+        fake.items[11] = {"id": 11, "project": 3, "fields": {"name": "Other requirement"}}
         service = make_service(fake, tmp_path, cache=True)
         await service.upload_attachment(10, png)
-        await service.upload_attachment(77, png)
+        await service.upload_attachment(11, png)
 
         assert len(fake.attachments) == 1
-        assert fake.links == {10: [500], 77: [500]}
+        assert fake.links == {10: [500], 11: [500]}
 
     async def test_stale_cache_entry_is_replaced(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
@@ -552,3 +557,95 @@ class TestJamaClient:
 
         assert fake.attachments[attachment_id]["fields"]["name"] == "N"
         assert fake.links == {10: [attachment_id]}
+
+
+# ---------------------------------------------------------------------------
+# Test runs are not items
+# ---------------------------------------------------------------------------
+
+RUN = 77
+ITEM_ROUTE = f"rest/v1/items/{RUN}"
+
+
+class TestUploadForATestRun:
+    def test_fake_answers_404_for_a_test_run_id_on_items(self, fake: FakeJamaAttachments) -> None:
+        assert RUN in fake.test_runs and RUN not in fake.items
+
+    async def test_project_comes_from_the_test_run_when_the_item_lookup_is_404(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path)
+
+        result = await service.upload_attachment(RUN, png)
+
+        assert fake.attachments[result.attachment_id]["project"] == 3
+        assert result.project_id == 3 and result.target_is_test_run is True
+        assert fake.count("GET", ITEM_ROUTE) == 1
+        assert fake.count("GET", f"rest/v1/testruns/{RUN}") == 1
+        assert await service.fetch_embedded(result.embed_url) == PNG
+
+    async def test_no_link_is_attempted_and_that_is_info_not_a_warning(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path)
+
+        result = await service.upload_attachment(RUN, png)
+
+        assert result.linked is False
+        assert result.warnings == []
+        assert len(result.info) == 1 and "no Attachments tab via REST" in result.info[0]
+        assert fake.count("POST", f"{ITEM_ROUTE}/attachments") == 0
+        assert fake.count("GET", f"{ITEM_ROUTE}/attachments") == 0
+        assert fake.links == {}
+        assert result.to_dict()["info"] == result.info
+
+    async def test_explicit_project_is_used_for_a_test_run(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path)
+
+        result = await service.upload_attachment(RUN, png, project_id=5)
+
+        assert fake.attachments[result.attachment_id]["project"] == 5
+        assert result.linked is False and result.target_is_test_run is True
+        assert fake.count("POST", f"{ITEM_ROUTE}/attachments") == 0
+
+    async def test_known_test_run_needs_no_item_lookup(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path)
+
+        await service.upload_attachment(RUN, png, project_id=3, target_is_test_run=True)
+
+        assert fake.count("GET", ITEM_ROUTE) == 0
+        assert fake.count("GET", f"rest/v1/testruns/{RUN}") == 0
+
+    async def test_reused_upload_for_a_test_run_is_not_linked_either(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path, cache=True)
+        await service.upload_attachment(10, png)
+
+        again = await service.upload_attachment(RUN, png)
+
+        assert again.reused is True and again.linked is False
+        assert fake.links == {10: [500]}
+
+    async def test_unknown_id_keeps_the_item_error(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path)
+
+        with pytest.raises(ResourceNotFoundException, match="Item not found"):
+            await service.upload_attachment(4242, png)
+        assert fake.attachments == {}
+
+    async def test_ordinary_item_is_still_linked(
+        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
+    ) -> None:
+        service = make_service(fake, tmp_path)
+
+        result = await service.upload_attachment(10, png)
+
+        assert result.linked is True and result.target_is_test_run is False
+        assert result.info == [] and fake.links == {10: [500]}

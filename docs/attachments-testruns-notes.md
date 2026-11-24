@@ -58,7 +58,25 @@ CLI (jama_cli/commands/attachments.py, testruns.py)      MCP (jama_mcp_server/co
 6. `GET files?url=<embed url>` must return 200 with a non-empty body, otherwise
    `EmbedVerificationError`.
 
-The project defaults to the `project` of the item (`GET items/{id}`).
+The project defaults to the `project` of the item (`GET items/{id}`), or is given with
+`--project` / `project_id`.
+
+**Test runs are not items.** On the real instance `GET items/{testRunId}` and
+`POST items/{testRunId}/attachments` answer 404 "Item with ID ... does not exist". So for a
+test run id:
+
+- if `items/{id}` answers 404, `GET testruns/{id}` is tried and its `project` is used
+  (`AttachmentService._resolve_target()`);
+- step 3 is not attempted at all. The result says `linked: false`,
+  `target_is_test_run: true` and carries an `info` entry ("Test runs have no Attachments tab
+  via REST ..."), not a warning. Embedding by URL works without the link;
+- `testruns add-screenshot` passes the run's project itself and never asks `items/{id}`.
+
+For the same reason `jama items list <project> --type <id>` cannot return test plans, test
+cycles or test runs: `GET /items?project=` silently returns none. The command now fails with
+a hint when the type is one of those (matched by `typeKey` `TSTPL` / `TSTCY` / `TSTRN`, or
+by `category`). Only `TSTRN` was seen on the real instance; the other two keys and the
+`category` values are from general knowledge of Jama and UNVERIFIED.
 
 ### Session-auth fallback
 
@@ -135,7 +153,7 @@ How the code uses that:
    is retried.
 
 Screenshots: all files are read and the step index is checked before the first upload;
-each file is uploaded (and linked to the test run, a refused link is only a warning);
+each file is uploaded to the run's project (no link, see "Test runs are not items");
 all `<p>caption</p><p><img .../></p>` blocks of one call are written with one PUT.
 
 ### Idempotency
@@ -175,16 +193,16 @@ Rows without a **VERIFIED** mark are UNVERIFIED.
 | 5 | **VERIFIED.** Sending the full step list, each step as read with all its keys (including `action`), is accepted and leaves the other steps byte-identical. Whether a partial list would be accepted is unknown and not needed: the code always sends the full list. | `TestRunService._put_body()` |
 | 6 | **VERIFIED.** GET omits empty fields at run level and inside steps. A run-level field the item type lists is treated as empty when GET omits it, and a step without `result` has empty results. Comparisons treat absent and empty as equal. | `_is_empty()` / `_same()`, `step_result()` |
 | 7 | **VERIFIED** for runs generated from a test plan: `add-screenshot` found the project without `--project`. Which of the lookups (`project` on the run, or on its cycle) answered was not recorded. | `TestRunService.project_of_run()`, `RUN_CYCLE_FIELD` |
-| 8 | Under SSO, "refused" for the REST create is HTTP 401 or 403. The message is not inspected. If the refusal is another status, or should depend on the message, change it here. | `REST_CREATE_REFUSED_STATUSES` and `is_rest_create_refused()` in `jama_cli/core/attachments.py` |
+| 8 | UNVERIFIED. Under SSO, "refused" for the REST create is HTTP 401 or 403. On the real instance the REST create and the file PUT **worked** under `session` auth for an SSO user, so the fallback was never needed and could not be observed. | `REST_CREATE_REFUSED_STATUSES` and `is_rest_create_refused()` in `jama_cli/core/attachments.py` |
 | 9 | A 401 with an empty message is first treated as a dead session by the HTTP client (CSRF refresh, re-login). The fallback only happens if the 401 survives that, so a refusal with an empty 401 costs one extra GET (CSRF refresh) and one repeated POST before the fallback. | `JamaHttpClient._session_request` (not changed here) |
-| 10 | The internal endpoint takes `itemId`, `attachmentDocument` (JSON) and `originalFileName` as plain form fields and `file` as a file part, answers with JSON containing `meta.id`, and needs no further parameters or headers. | `JamaApi.post_internal_attachment()` in `jama_cli/core/api.py` |
-| 11 | The file id is `data.fields.attachment` of `GET attachments/{id}`. | `FILE_ID_FIELD` / `file_id_of()` in `jama_cli/core/attachments.py` |
-| 12 | The embed URL uses the uploaded file name, URL-encoded with `%20` for spaces. | `build_embed_url()` in `jama_cli/core/attachments.py` |
-| 13 | `GET attachments/{id}/file` and `GET files?url=` return the bytes directly (no redirect to another host) and accept `Accept: */*`. A redirect would be reported as an error. | `JamaApi.get_attachment_file()` / `get_file_by_url()` |
-| 14 | `PUT attachments/{id}/file` accepts the multipart part name `file`; the response body is not read. | `JamaApi.put_attachment_file()` |
+| 10 | UNVERIFIED (the fallback was not needed, see #8). The internal endpoint takes `itemId`, `attachmentDocument` (JSON) and `originalFileName` as plain form fields and `file` as a file part, answers with JSON containing `meta.id`, and needs no further parameters or headers. Whether it accepts a test run id as `itemId` is unknown. | `JamaApi.post_internal_attachment()` in `jama_cli/core/api.py` |
+| 11 | **VERIFIED.** The file id is `data.fields.attachment` of `GET attachments/{id}`, and it differs from the attachment id. | `FILE_ID_FIELD` / `file_id_of()` in `jama_cli/core/attachments.py` |
+| 12 | **VERIFIED.** The embed URL uses the file id and the uploaded file name; names with spaces load as `%20`. | `build_embed_url()` in `jama_cli/core/attachments.py` |
+| 13 | **VERIFIED.** `attachments download` (`GET attachments/{id}/file`) and `download-url` (`GET files?url=`) return the original bytes. | `JamaApi.get_attachment_file()` / `get_file_by_url()` |
+| 14 | **VERIFIED.** `POST projects/{id}/attachments` followed by `PUT attachments/{id}/file` with the multipart part `file` works, also under `session` auth for an SSO user. | `JamaApi.put_attachment_file()` |
 | 15 | `POST items/{id}/attachments` and `PUT testruns/{id}` answer with a JSON body (the code parses it). An empty body would raise after the write succeeded. | `JamaHttpClient.post()` / `put()` |
-| 16 | `GET items/{id}/attachments` lists linked attachments with their `id`. If it fails, the link is simply attempted. A repeated link either returns 409 (treated as linked) or is prevented by this check. | `AttachmentService._is_linked()` / `link_attachment()` |
-| 17 | `GET items/{id}` works for a test run id (only used when `upload_attachment` is called for a run without a project id; the test-run commands pass the project). | `AttachmentService._project_of_item()` |
+| 16 | **VERIFIED** for ordinary items: linking shows the attachment on the item's Attachments tab, and a re-run reuses the attachment without a second `<img>`. Whether a repeated link answers 409 was not observed. | `AttachmentService._is_linked()` / `link_attachment()` |
+| 17 | **VERIFIED, and it was wrong before.** `GET items/{id}` does NOT work for a test run id (404), and neither does `POST items/{id}/attachments`. The project is taken from `GET testruns/{id}` and no link is attempted. | `AttachmentService._resolve_target()` |
 | 18 | **VERIFIED** for the cases tried: after a PUT the other steps, their statuses and the run-level `actualResults` were byte-identical. Not tried with unusual HTML (tables, pasted Word content); if Jama rewrites such content on save, the "previous content no longer intact" check raises although nothing was lost. | `_verify_target()` in `jama_cli/core/testruns.py` |
 | 19 | **VERIFIED.** `<p>caption</p><p><img src="..." alt="..." /></p>` in a step `result` is kept as sent and renders in the step's "Result" column. | `screenshot_block_html()` in `jama_cli/core/attachments.py` |
 
@@ -206,15 +224,20 @@ Use a scratch project and a scratch test run.
    `result` on step 1. A `TestRunVerificationError` ("did not store") means the instance
    stores step results under another key (#3).
 5. `jama testruns add-screenshot <runId> some.png --step 1 --caption "cli test"`: the
-   image shows in step 1; run it a second time: no second attachment, no second image.
-   A warning about the Attachments tab means the instance does not allow linking to
-   test runs.
-6. With `auth_type: session` as an SSO user: repeat 2 and 5 with `-vv`. The log line
-   "Jama refused the REST attachment create; using the internal web UI endpoint" shows
-   the fallback was used. If the upload fails instead, note the HTTP status and message
-   Jama returned (#8, #10).
-7. Try 4 on a run in a locked/closed cycle: Jama's error is shown, nothing is changed.
-8. Optional: the opt-in live test, see the docstring of `tests/test_attachments_live.py`.
+   image shows in the "Result" column of step 1; run it a second time: no second
+   attachment, no second image. The note about the Attachments tab is expected.
+6. `jama attachments upload <runId> some.png` (a test run id, with and without
+   `--project`): succeeds, `Linked to test run <id>: no`, no warning.
+7. `jama items list <project> --type <test run type id>`: fails with a hint instead of
+   printing an empty list.
+8. STILL OPEN: with `auth_type: session` as an SSO user on an instance that refuses the
+   REST attachment create, repeat 2 and 5 with `-vv`. The log line "Jama refused the REST
+   attachment create; using the internal web UI endpoint" shows the fallback was used. If
+   the upload fails instead, note the HTTP status and message Jama returned (#8, #10).
+9. STILL OPEN: try 4 on a run in a locked/closed cycle: Jama's error should be shown and
+   nothing changed.
+10. The opt-in live test does 1, 4, 5 and a status update on a test cycle it creates
+    itself; see the docstring of `tests/test_attachments_live.py`.
 
 ## Not done
 

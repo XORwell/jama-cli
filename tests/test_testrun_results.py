@@ -482,10 +482,14 @@ class TestAttachScreenshots:
         assert result.embedded == [url]
         assert result.attachments[0].attachment_id == 500
         assert result.attachments[0].file_id == 9000
-        # Created in the run's project and linked to the run.
+        # Created in the run's project. A test run is not an item: no link is
+        # attempted, and that is reported as info, not as a warning.
         assert fake.attachments[500]["project"] == 3
-        assert fake.links == {RUN: [500]}
+        assert fake.links == {}
+        assert fake.count("POST", f"rest/v1/items/{RUN}/attachments") == 0
+        assert fake.count("GET", f"rest/v1/items/{RUN}") == 0
         assert result.warnings == []
+        assert any("no Attachments tab via REST" in note for note in result.info)
 
     async def test_run_level_without_caption_uses_file_name_as_alt(
         self, fake: FakeJamaAttachments, original: dict[str, Any], tmp_path: Path, png: Path
@@ -533,7 +537,7 @@ class TestAttachScreenshots:
         assert len(fake.run_puts) == 1
         assert second.updated is False
         assert second.skipped == first.embedded
-        assert fake.links == {RUN: [500]}
+        assert fake.links == {}
 
     async def test_same_file_twice_in_one_call_is_embedded_once(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
@@ -544,22 +548,6 @@ class TestAttachScreenshots:
 
         assert len(fake.attachments) == 1
         assert steps_of(fake)[0]["result"].count("<img ") == 1
-
-    async def test_link_refused_still_embeds_and_warns(
-        self, fake: FakeJamaAttachments, tmp_path: Path, png: Path
-    ) -> None:
-        fake.refuse_link_for = {RUN}
-        runs = make_runs(fake, tmp_path)
-
-        result = await runs.attach_screenshots_to_test_run(RUN, [png], step=1)
-
-        assert f"{fake.base}/attachment/9000/shot.png" in steps_of(fake)[0]["result"]
-        assert result.updated is True
-        assert result.attachments[0].linked is False
-        assert fake.links == {}
-        assert len(result.warnings) == 1
-        assert "Attachments tab" in result.warnings[0]
-        assert "not allowed for this item type" in result.warnings[0]
 
     async def test_caption_and_alt_are_escaped(
         self, fake: FakeJamaAttachments, tmp_path: Path, png: Path

@@ -71,7 +71,7 @@ class TestAttachmentsUpload:
         assert "File ID: 9000" in result.stdout
         assert "https://jama.example.com/contour/attachment/9000/shot.png" in result.stdout
         attachments_client.upload_attachment.assert_called_once_with(
-            10, png, name=None, description="", link=True, use_cache=True
+            10, png, name=None, description="", project_id=None, link=True, use_cache=True
         )
 
     def test_upload_options(self, attachments_client, png):
@@ -84,8 +84,26 @@ class TestAttachmentsUpload:
 
         assert result.exit_code == 0
         attachments_client.upload_attachment.assert_called_once_with(
-            10, png, name="N", description="D", link=False, use_cache=True
+            10, png, name="N", description="D", project_id=None, link=False, use_cache=True
         )
+
+    def test_upload_with_project_for_a_test_run(self, attachments_client, png):
+        attachments_client.upload_attachment.return_value = dict(
+            UPLOAD_RESULT,
+            linked=False,
+            target_is_test_run=True,
+            info=["Test runs have no Attachments tab via REST, so the attachment was not linked"],
+        )
+
+        result = runner.invoke(attachments_app, ["upload", "77", str(png), "--project", "3"])
+
+        assert result.exit_code == 0
+        attachments_client.upload_attachment.assert_called_once_with(
+            77, png, name=None, description="", project_id=3, link=True, use_cache=True
+        )
+        assert "Linked to test run 77: no" in result.stdout
+        assert "no Attachments tab via REST" in " ".join(result.output.split())
+        assert "Warning" not in result.output
 
     def test_upload_json(self, attachments_client, png):
         attachments_client.upload_attachment.return_value = dict(UPLOAD_RESULT)

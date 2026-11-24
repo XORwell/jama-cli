@@ -34,6 +34,8 @@ def _target(test_run_id: int, step: int | None) -> str:
 def _report(ctx: typer.Context, json_flag: bool, result: dict[str, Any], message: str) -> None:
     for warning in result.get("warnings", []):
         print_warning(warning)
+    for note in result.get("info", []):
+        print_info(note)
     if _wants_json(ctx, json_flag):
         typer.echo(json.dumps(result, indent=2))
     elif result.get("updated"):

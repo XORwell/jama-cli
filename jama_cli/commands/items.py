@@ -37,6 +37,37 @@ def _flatten_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+# Item types whose instances ``GET /items?project=`` never returns: test plans,
+# test cycles and test runs live under their own endpoints. Matched by
+# ``typeKey`` (and by ``category`` where an instance reports one).
+_TEST_TYPE_HINTS: dict[str, tuple[str, str]] = {
+    "TSTPL": ("test plan", "they are listed under the project's test plans in Jama"),
+    "TSTCY": ("test cycle", "see `jama tests cycle <cycle id>`"),
+    "TSTRN": ("test run", "see `jama tests runs <cycle id>` and `jama testruns get <run id>`"),
+}
+_TEST_CATEGORIES = {"TEST_PLAN": "TSTPL", "TEST_CYCLE": "TSTCY", "TEST_RUN": "TSTRN"}
+
+
+def test_type_hint(item_types: list[dict[str, Any]], item_type: int) -> str | None:
+    """Why listing items of this type cannot work, if it is a test plan/cycle/run type."""
+    definition = next((t for t in item_types if t.get("id") == item_type), None)
+    if definition is None:
+        return None
+    key = str(definition.get("typeKey") or "").upper()
+    if key not in _TEST_TYPE_HINTS:
+        key = _TEST_CATEGORIES.get(str(definition.get("category") or "").upper(), "")
+    if key not in _TEST_TYPE_HINTS:
+        return None
+    kind, where = _TEST_TYPE_HINTS[key]
+    return (
+        f"Item type {item_type} is the {kind} type. Jama's item list does not return "
+        f"{kind}s (it would silently be empty); {where}."
+    )
+
+
+test_type_hint.__test__ = False  # type: ignore[attr-defined]  # not a pytest test
+
+
 @app.command("list")
 def list_items(
     ctx: typer.Context,
@@ -71,6 +102,16 @@ def list_items(
     try:
         client = JamaClient(profile)
 
+        if item_type is not None:
+            try:
+                hint = test_type_hint(client.get_item_types(), item_type)
+            except Exception:
+                # The check is a convenience; listing itself reports real errors.
+                hint = None
+            if hint:
+                print_error(hint)
+                raise typer.Exit(1)
+
         # Use max_results for server-side limiting (much faster)
         max_results = limit if limit > 0 else None
         items = client.get_items(project_id, item_type=item_type, max_results=max_results)
@@ -94,6 +135,8 @@ def list_items(
             columns=columns,
         )
 
+    except typer.Exit:
+        raise
     except Exception as e:
         print_error(f"Failed to list items: {e}")
         raise typer.Exit(1) from e

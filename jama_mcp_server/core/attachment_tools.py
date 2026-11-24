@@ -174,15 +174,24 @@ def tool_definitions() -> list[Tool]:
                 "Modifies Jama: uploads a file as a new attachment and links it to an item "
                 "(it shows on the item's Attachments tab). Returns the attachment id, the "
                 "stored file's id and the embed URL to use for an inline image. Give either "
-                "file_path or content_base64 + file_name."
+                "file_path or content_base64 + file_name. item_id may be a test run id: "
+                "test runs are not items in the REST API, so the attachment is created in "
+                "the run's project but not linked (linked: false with an info entry); the "
+                "embed URL works without the link."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "item_id": {"type": "integer", "description": "Item to attach the file to"},
+                    "item_id": {
+                        "type": "integer",
+                        "description": "Item (or test run) to attach the file to",
+                    },
                     "project_id": {
                         "type": "integer",
-                        "description": "Project for the attachment (default: the item's project)",
+                        "description": (
+                            "Project for the attachment (default: the project of the item "
+                            "or test run)"
+                        ),
                     },
                     **_FILE_PROPERTIES,
                     "name": {

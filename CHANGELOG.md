@@ -74,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- `jama attachments upload <testRunId> <file>` failed with 404: test runs are not items in
+  the REST API (`items/{id}` and `items/{id}/attachments` answer 404 for a test run id). The
+  project is now taken from the test run, or from the new `--project` option, and no link is
+  attempted for a test run; the result says `linked: false` with an info note instead of a
+  404 warning. `testruns add-screenshot` no longer tries to link either
+- `jama items list <project> --type <id>` printed an empty list for test plan, test cycle
+  and test run types, which Jama's item list never returns; it now fails with a hint
 - Test run results per step were written to the wrong key. Jama stores a step's actual
   results under `result`; a step key `actualResults` is accepted and silently dropped, so
   `testruns set-actual --step`, `testruns add-screenshot --step` and the MCP tools failed on

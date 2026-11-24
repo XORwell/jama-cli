@@ -457,9 +457,10 @@ the targeted field is changed, the complete step list is sent back, and the run 
 read again to check that the other steps, their statuses and the existing HTML are
 unchanged. Existing content is appended to, never replaced, unless `--replace` is
 given. Running the same `add-screenshot` again neither uploads the file again nor
-adds a second image. If Jama does not allow an attachment to be linked to a test
-run, the image is still embedded and a warning says that it is missing from the
-Attachments tab. If the run cannot be edited (locked cycle, missing permission),
+adds a second image. Test runs are not items in Jama's REST API, so a screenshot is
+embedded by its URL but not linked to an Attachments tab; `jama attachments upload` accepts
+a test run id too (with `--project` if the project cannot be read from the run) and reports
+`Linked to test run <id>: no`. If the run cannot be edited (locked cycle, missing permission),
 Jama's error is shown and nothing is retried.
 
 The same functions are available in Python (`JamaClient.upload_attachment`,

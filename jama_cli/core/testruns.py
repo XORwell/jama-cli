@@ -30,6 +30,7 @@ from typing import Any, Literal
 
 from jama_cli.core.api import JamaApi
 from jama_cli.core.attachments import (
+    TEST_RUN_NOT_LINKED,
     AttachmentService,
     FileSource,
     UploadedAttachment,
@@ -269,6 +270,7 @@ class ScreenshotsResult:
     embedded: list[str]
     skipped: list[str]
     warnings: list[str] = field(default_factory=list)
+    info: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -279,6 +281,7 @@ class ScreenshotsResult:
             "embedded": list(self.embedded),
             "skipped": list(self.skipped),
             "warnings": list(self.warnings),
+            "info": list(self.info),
         }
 
 
@@ -463,11 +466,11 @@ class TestRunService:
                 content,
                 file_name=file_name,
                 project_id=project_id,
-                link=True,
-                # The image works without the Attachments-tab link, so a refused
-                # link must not stop the embed.
-                link_optional=True,
+                # A test run is not an item in the REST API: there is nothing to
+                # link to, and the image is embedded by its URL anyway.
+                link=False,
                 use_cache=use_cache,
+                target_is_test_run=True,
             )
             uploads.append(uploaded)
             warnings += uploaded.warnings
@@ -502,6 +505,7 @@ class TestRunService:
             embedded=list(embedded),
             skipped=list(skipped),
             warnings=warnings + update.warnings,
+            info=[TEST_RUN_NOT_LINKED],
         )
 
     # ----- generic partial update -----------------------------------------

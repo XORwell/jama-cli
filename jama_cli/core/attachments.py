@@ -36,6 +36,7 @@ from jama_cli.core.exceptions import (
     AlreadyExistsException,
     APIClientException,
     JamaException,
+    ResourceNotFoundException,
     TooManyRequestsException,
     UnauthorizedException,
 )
@@ -184,6 +185,14 @@ def _describe(exc: JamaException) -> str:
     return f"{status}: {message}" if message else status
 
 
+# Why an attachment for a test run is not linked. Not a problem: the embed URL
+# works without the link.
+TEST_RUN_NOT_LINKED = (
+    "Test runs have no Attachments tab via REST, so the attachment was not linked; "
+    "embedding it by URL works without the link."
+)
+
+
 @dataclass
 class UploadedAttachment:
     """Result of an upload: everything needed to reference the file."""
@@ -197,6 +206,10 @@ class UploadedAttachment:
     reused: bool = False
     via_internal_endpoint: bool = False
     warnings: list[str] = field(default_factory=list)
+    # Things worth knowing that are not problems (e.g. why nothing was linked).
+    info: list[str] = field(default_factory=list)
+    # The target id is a test run, which is not an item in the REST API.
+    target_is_test_run: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -208,7 +221,9 @@ class UploadedAttachment:
             "linked": self.linked,
             "reused": self.reused,
             "via_internal_endpoint": self.via_internal_endpoint,
+            "target_is_test_run": self.target_is_test_run,
             "warnings": list(self.warnings),
+            "info": list(self.info),
         }
 
 
@@ -451,11 +466,17 @@ class AttachmentService:
         link_optional: bool = False,
         verify: bool = True,
         use_cache: bool = True,
+        target_is_test_run: bool | None = None,
     ) -> UploadedAttachment:
         """Upload a file, link it to an item and resolve its embed URL.
 
+        A test run is not an item in the REST API: ``items/{id}`` and
+        ``items/{id}/attachments`` answer 404 for a test run id. For a test run
+        the project is taken from ``testruns/{id}`` and no link is attempted;
+        the file can still be embedded by its URL.
+
         Args:
-            item_id: Item the attachment belongs to
+            item_id: Item (or test run) the attachment belongs to
             file: Path to the file, or its bytes (then ``file_name`` is required)
             name: Attachment name (default: the file name)
             description: Attachment description
@@ -465,11 +486,18 @@ class AttachmentService:
             link_optional: A refused link becomes a warning instead of an error
             verify: Check that the embed URL serves the file
             use_cache: Reuse an earlier upload of the same bytes to the same project
+            target_is_test_run: ``True`` if ``item_id`` is known to be a test run,
+                ``None`` to find out (only asked when a link or the project needs it)
         """
         actual_name, content = read_source(file, file_name)
         self._check_size(actual_name, content)
-        if project_id is None:
-            project_id = await self._project_of_item(item_id)
+        project_id, is_test_run = await self._resolve_target(
+            item_id, project_id, link, target_is_test_run
+        )
+        info: list[str] = []
+        if is_test_run and link:
+            link = False
+            info.append(TEST_RUN_NOT_LINKED)
 
         cache = self._cache if use_cache else None
         digest = hashlib.sha256(content).hexdigest()
@@ -541,16 +569,55 @@ class AttachmentService:
         result.linked = linked
         result.via_internal_endpoint = via_internal
         result.warnings = warnings
+        result.info = info
+        result.target_is_test_run = is_test_run
         return result
 
-    async def _project_of_item(self, item_id: int) -> int:
-        item = await self._api.get_item(item_id)
-        project = item.get("project")
-        if not isinstance(project, int):
-            raise AttachmentError(
-                f"Could not determine the project of item {item_id}; pass the project id"
-            )
-        return project
+    async def _resolve_target(
+        self,
+        item_id: int,
+        project_id: int | None,
+        link: bool,
+        is_test_run: bool | None,
+    ) -> tuple[int, bool]:
+        """The project to upload to, and whether the target is a test run.
+
+        ``items/{id}`` is only asked when the answer is needed: for the project,
+        or to know whether a link can be attempted. A 404 there followed by a hit
+        on ``testruns/{id}`` means the id is a test run.
+        """
+        if is_test_run is None and project_id is not None and not link:
+            return project_id, False
+
+        if not is_test_run:
+            try:
+                item = await self._api.get_item(item_id)
+            except ResourceNotFoundException as not_an_item:
+                try:
+                    run = await self._api.get_test_run(item_id)
+                except ResourceNotFoundException:
+                    raise not_an_item from None
+                return project_id or self._project_of(run, "test run", item_id), True
+            return project_id or self._project_of(item, "item", item_id), False
+
+        if project_id is not None:
+            return project_id, True
+        run = await self._api.get_test_run(item_id)
+        return self._project_of(run, "test run", item_id), True
+
+    @staticmethod
+    def _project_of(record: dict[str, Any], kind: str, record_id: int) -> int:
+        fields = record.get("fields")
+        candidates = [record.get("project")]
+        if isinstance(fields, dict):
+            candidates.append(fields.get("project"))
+        for candidate in candidates:
+            if isinstance(candidate, int):
+                return candidate
+        raise AttachmentError(
+            f"Could not determine the project of {kind} {record_id}; pass the project id "
+            "(--project / project_id)"
+        )
 
     async def fetch_attachment(self, attachment_id: int) -> bytes:
         """The file content of an attachment."""
