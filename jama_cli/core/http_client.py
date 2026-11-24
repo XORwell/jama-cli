@@ -26,7 +26,7 @@ from jama_cli.core.exceptions import (
     TooManyRequestsException,
     UnauthorizedException,
 )
-from jama_cli.core.session import LOGIN_HINT, SessionManager, is_session_rejected
+from jama_cli.core.session import LOGIN_HINT, SessionManager, is_auth_rejected, is_csrf_rejected
 from jama_cli.core.session_store import StoredSession
 
 # Jama API max page size
@@ -195,43 +195,72 @@ class JamaHttpClient:
     async def _send_with_session(
         self, session: StoredSession, method: str, path: str, **kwargs: Any
     ) -> httpx.Response:
-        """Send one request authenticated with the given web session."""
+        """Send one request authenticated with the given web session.
+
+        Cookies the server sets in its answer are taken over into the session
+        (and saved), so a token or session id replaced by Jama is not lost.
+        """
+        manager = self._session
+        assert manager is not None
         headers = dict(kwargs.pop("headers", None) or {})
         headers.update(session.auth_headers())
         try:
-            return await self._client.request(method, path, headers=headers, **kwargs)
+            response = await self._client.request(method, path, headers=headers, **kwargs)
         finally:
             # The session object is the single source of truth for cookies;
             # never let httpx replay cookies it collected on its own.
             self._client.cookies.clear()
+        await manager.absorb(session, response)
+        return response
 
     async def _session_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """Send a request with the web session, repairing the session if needed.
 
-        On a session-rejected response the following steps run in order, each at
-        most once per request:
+        Jama checks the CSRF header on every call, reads included. A 401 that
+        mentions "csrf" is a token problem on a live session; a 401 with an
+        empty message or a redirect to the login page is a dead session. When a
+        request is not accepted, the following steps run in order, each at most
+        once per request:
 
-        1. writes only: refresh the CSRF token with one GET and retry;
+        1. CSRF repair (any method):
+           a. take the token from the ``jama-csrf-token`` cookie if it differs
+              from the header that was sent, and retry;
+           b. fetch the current token with one GET and retry. This also runs
+              for a write that was rejected without a CSRF message. If that
+              GET is accepted, the session is alive and the retry's answer is
+              final; steps 2 and 3 only run when the GET is rejected as well.
         2. re-read the store; if another process wrote a newer session, retry;
         3. take the lock, re-read again, and only if the store still holds the
            same dead session, log in again, save and retry.
 
         If that still fails, an UnauthorizedException tells the user to run
-        ``jama login``. There is no loop.
+        ``jama login``. A 401 that mentions "permission" is returned to the
+        caller right away. There is no loop.
         """
         manager = self._session
         assert manager is not None
 
         session = manager.current()
         if session is not None:
+            sent_token = session.csrf_token
             response = await self._send_with_session(session, method, path, **kwargs)
-            if not is_session_rejected(response):
+            if not is_auth_rejected(response):
                 return response
 
-            # 1. A write rejected on a live session is a stale CSRF token.
-            if method.upper() != "GET" and await manager.refresh_csrf(session):
-                # The GET proved the session is alive, so logging in again could
-                # not help: whatever the retry returns is the answer.
+            # 1a. The header is out of step with the cookie.
+            if is_csrf_rejected(response) and await manager.adopt_cookie_csrf(session, sent_token):
+                response = await self._send_with_session(session, method, path, **kwargs)
+                if not is_auth_rejected(response):
+                    return response
+
+            # 1b. Ask Jama for the current token. Skipped for a read that looks
+            # like a dead session: the GET could only confirm that.
+            if (
+                is_csrf_rejected(response) or method.upper() != "GET"
+            ) and await manager.refresh_csrf(session):
+                # The GET proved the session alive and gave us the current
+                # token, so logging in again could not change anything:
+                # whatever this retry returns is the answer.
                 return await self._send_with_session(session, method, path, **kwargs)
 
             # 2. Another process may already have logged in again.
@@ -239,13 +268,13 @@ class JamaHttpClient:
             if newer is not None:
                 session = newer
                 response = await self._send_with_session(session, method, path, **kwargs)
-                if not is_session_rejected(response):
+                if not is_auth_rejected(response):
                     return response
 
         # 3. Double-checked re-login under the cross-process lock.
         session = await manager.recover(session)
         response = await self._send_with_session(session, method, path, **kwargs)
-        if is_session_rejected(response):
+        if is_auth_rejected(response):
             raise UnauthorizedException(LOGIN_HINT, status_code=401)
         return response
 
@@ -279,32 +308,40 @@ class JamaHttpClient:
 
     # --- Convenience HTTP methods ---
 
+    @staticmethod
+    def _json(response: httpx.Response) -> dict[str, Any]:
+        """Decode a response body; an empty body (e.g. 204 No Content) is ``{}``."""
+        if response.status_code == 204 or not response.content.strip():
+            return {}
+        data: dict[str, Any] = response.json()
+        return data
+
     async def get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """GET a single resource. Returns the response JSON."""
         response = await self._request("GET", path, params=params)
-        return response.json()
+        return self._json(response)
 
     async def post(
         self, path: str, json: dict[str, Any] | None = None, **kwargs: Any
     ) -> dict[str, Any]:
-        """POST to a resource. Returns the response JSON."""
+        """POST to a resource. Returns the response JSON ({} for an empty body)."""
         response = await self._request("POST", path, json=json, **kwargs)
-        return response.json()
+        return self._json(response)
 
     async def put(self, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
-        """PUT a resource. Returns the response JSON."""
+        """PUT a resource. Returns the response JSON ({} for an empty body)."""
         response = await self._request("PUT", path, json=json)
-        return response.json()
+        return self._json(response)
 
     async def patch(self, path: str, json: Any = None) -> dict[str, Any]:
-        """PATCH a resource. Returns the response JSON."""
+        """PATCH a resource. Returns the response JSON ({} for an empty body)."""
         response = await self._request("PATCH", path, json=json)
-        return response.json()
+        return self._json(response)
 
     async def delete(self, path: str) -> dict[str, Any]:
-        """DELETE a resource. Returns the response JSON."""
+        """DELETE a resource. Returns the response JSON ({} for an empty body)."""
         response = await self._request("DELETE", path)
-        return response.json()
+        return self._json(response)
 
     # --- Raw access (file transfers, non-REST endpoints) ---
 

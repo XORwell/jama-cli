@@ -26,8 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     writes), so terminals, IDE windows and MCP servers reuse one session instead of
     invalidating each other's
   - Persistent browser profile for silent re-login; no idle logout
-  - Automatic recovery: CSRF token refresh for writes, pick-up of a session renewed by another
-    process, and a single locked re-login
+  - Automatic recovery: CSRF token repair, pick-up of a session renewed by another process,
+    and a single locked re-login
   - `login_interactive` setting (`auto` | `always` | `never`) and optional keepalive
   - stdio MCP server: session auth plus `get_session_status` and `logout_session` tools
   - Playwright is an optional extra: `pip install "jama-cli[browser]"`
@@ -66,6 +66,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- Session auth: a wrong or missing CSRF token is repaired silently for every HTTP method.
+  Jama checks the token on reads too and answers 401 "CSRF Exception"; this was taken for a
+  dead session and led to an unnecessary login (or a failure with `login_interactive: never`)
+- Session auth: cookies that Jama sets in ordinary responses are taken over and saved, not
+  only those of the login probe
+- Deleting (and any other write) no longer fails with `Expecting value: line 1 column 1` when
+  Jama answers with an empty body; affects all auth modes
+- Hints and progress messages (`Showing first N items ...`, `Searching for ...`, `Info: ...`)
+  go to stderr, so `jama -o json ... | jq` receives valid JSON; an empty result prints `[]`
+  for JSON and YAML instead of `No data to display`
+- README and EXAMPLES showed `--output` after the subcommand, where it is not accepted; it is
+  a global option (`jama -o json items list 123`)
+- Dropped the `all` extra from the `typer` dependency, which newer typer versions no longer
+  provide
 - `upload_attachment` passed the file path as an attachment id and never uploaded anything
 - `download_attachment` wrote the attachment's metadata as JSON instead of the file
 - MCP tool `update_test_run` sent a partial update as the whole PUT body, which could wipe

@@ -60,7 +60,8 @@ class TestPrintFunctions:
 
     def test_print_info(self):
         """Test print_info function."""
-        with patch.object(console, "print") as mock_print:
+        # Info goes to stderr so that stdout stays machine-readable.
+        with patch.object(error_console, "print") as mock_print:
             print_info("Test info message")
             mock_print.assert_called()
 

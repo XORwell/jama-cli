@@ -42,7 +42,11 @@ def format_output(
         data = [data]
 
     if not data:
-        console.print("[dim]No data to display[/dim]")
+        # Machine-readable formats must stay parseable when there is nothing.
+        if format in (OutputFormat.JSON, OutputFormat.YAML):
+            print("[]")
+        elif format == OutputFormat.TABLE:
+            console.print("[dim]No data to display[/dim]")
         return
 
     if format == OutputFormat.TABLE:

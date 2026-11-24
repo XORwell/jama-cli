@@ -16,6 +16,7 @@ from jama_cli.output import (
     format_output,
     format_single_item,
     print_error,
+    print_hint,
     print_success,
 )
 
@@ -76,7 +77,7 @@ def list_items(
 
         # Show info about limiting
         if limit > 0 and len(items) == limit:
-            console.print(f"[dim]Showing first {limit} items. Use --limit 0 for all.[/dim]")
+            print_hint(f"Showing first {limit} items. Use --limit 0 for all.")
 
         # Parse fields
         columns = (

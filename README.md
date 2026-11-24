@@ -22,7 +22,7 @@ jama config init
 # Use
 jama projects list
 jama items list 123
-jama items get 456 --output json
+jama -o json items get 456
 ```
 
 ## Features
@@ -50,9 +50,9 @@ jama items get 456 --output json
 ### Output Formats
 ```bash
 jama items list 123                    # Table (default)
-jama items list 123 --output json      # JSON
-jama items list 123 --output csv       # CSV
-jama items list 123 --output yaml      # YAML
+jama -o json items list 123      # JSON
+jama -o csv items list 123       # CSV
+jama -o yaml items list 123      # YAML
 ```
 
 ## Installation
@@ -279,7 +279,7 @@ Chromium is started with `--no-sandbox --disable-dev-shm-usage` automatically.
 ```bash
 jama projects list                     # List all projects
 jama projects get 123                  # Get project details
-jama projects list --output json       # JSON output
+jama -o json projects list       # JSON output
 ```
 
 ### Items
@@ -537,12 +537,12 @@ Options:
 
 ### List requirements and export to CSV
 ```bash
-jama items list 123 --type 45 --output csv > requirements.csv
+jama -o csv items list 123 --type 45 > requirements.csv
 ```
 
 ### Get item as JSON for scripting
 ```bash
-ITEM=$(jama items get 456 --output json)
+ITEM=$(jama -o json items get 456)
 echo $ITEM | jq '.fields.name'
 ```
 
@@ -558,7 +558,7 @@ jama items create 123 \
 
 ### Trace upstream requirements
 ```bash
-jama relationships upstream 456 --output table
+jama -o table relationships upstream 456
 ```
 
 ### Use different profile
@@ -675,7 +675,7 @@ docker run --rm \
   -e JAMA_URL=https://company.jamacloud.com \
   -e JAMA_API_KEY=your-api-key \
   ghcr.io/xorwell/jama-cli \
-  jama items list 123 --output json
+  jama -o json items list 123
 ```
 
 ### Building Locally
