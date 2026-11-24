@@ -7,6 +7,8 @@ compatibility with Claude Desktop, Cline, VS Code, and other MCP clients.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -16,20 +18,25 @@ from mcp.types import TextContent, Tool
 
 from jama_cli.core.api import JamaApi
 from jama_cli.core.http_client import JamaHttpClient
+from jama_cli.core.session import SessionManager, SessionSettings
 from jama_mcp_server.models import JamaConfig
 
 
 class JamaStdioMCPServer:
     """Stdio-based MCP server implementation for Jama API with read and write capabilities."""
 
-    def __init__(self, config: JamaConfig):
+    def __init__(self, config: JamaConfig, session_settings: SessionSettings | None = None):
         """
         Initialize the Jama stdio MCP server.
 
         Args:
             config: Jama configuration
+            session_settings: Set for ``auth_type=session``: authenticate with the
+                user's Jama web session instead of API credentials
         """
         self.config = config
+        self.session_settings = session_settings
+        self._session: SessionManager | None = None
         self._api: JamaApi | None = None
         self._http: JamaHttpClient | None = None
         self.mcp = Server("jama-mcp-server")
@@ -415,6 +422,24 @@ class JamaStdioMCPServer:
                         "required": ["test_run_id", "data"],
                     },
                 ),
+                Tool(
+                    name="get_session_status",
+                    description=(
+                        "Report the Jama login session used by this server "
+                        "(auth_type=session): user, age, last validation and whether "
+                        "it is currently valid. Never returns cookies or tokens."
+                    ),
+                    inputSchema={"type": "object", "properties": {}},
+                ),
+                Tool(
+                    name="logout_session",
+                    description=(
+                        "Log out of Jama and delete the stored login session "
+                        "(auth_type=session). Releases the license seat. The next "
+                        "request needs a new login."
+                    ),
+                    inputSchema={"type": "object", "properties": {}},
+                ),
             ]
 
         @self.mcp.call_tool()
@@ -439,7 +464,18 @@ class JamaStdioMCPServer:
 
         api = self._api
 
-        if name == "get_projects":
+        if name == "get_session_status":
+            if not self._session:
+                return {"auth_type": "credentials", "session": None}
+            return {"auth_type": "session", "session": await self._session.status()}
+
+        elif name == "logout_session":
+            if not self._session:
+                raise ValueError("logout_session only applies to auth_type=session")
+            had_session = await self._session.logout()
+            return {"logged_out": True, "had_session": had_session}
+
+        elif name == "get_projects":
             return await api.get_projects()
 
         elif name == "get_project":
@@ -564,6 +600,14 @@ class JamaStdioMCPServer:
         try:
             logger.info(f"Initializing Jama client for {self.config.url}")
 
+            if self.session_settings is not None:
+                logger.info("Using browser-session authentication")
+                self._session = SessionManager(self.session_settings)
+                self._http = JamaHttpClient(base_url=self.config.url, session=self._session)
+                self._api = JamaApi(self._http)
+                logger.info("Jama client initialized successfully")
+                return
+
             if self.config.client_id and self.config.client_secret:
                 logger.info("Using OAuth client credentials authentication")
                 credentials = (self.config.client_id, self.config.client_secret)
@@ -596,11 +640,34 @@ class JamaStdioMCPServer:
         await self.initialize_client()
         logger.info("Starting Jama stdio MCP server")
 
+        keepalive: asyncio.Task[None] | None = None
+        if self._session and self._session.settings.keepalive_minutes > 0:
+            keepalive = asyncio.create_task(self._keepalive_loop())
+
         try:
             async with stdio_server() as (read_stream, write_stream):
                 await self.mcp.run(
                     read_stream, write_stream, self.mcp.create_initialization_options()
                 )
         finally:
+            if keepalive:
+                keepalive.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await keepalive
             if self._http:
                 await self._http.close()
+
+    async def _keepalive_loop(self) -> None:
+        """Opt-in: one cheap GET every N minutes so Jama does not idle the session out.
+
+        Never logs in; a failed keepalive is only logged (to stderr).
+        """
+        assert self._session is not None
+        interval = self._session.settings.keepalive_minutes * 60
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                if not await self._session.keepalive():
+                    logger.warning("Jama session keepalive failed; the session is not valid")
+            except Exception as e:
+                logger.warning(f"Jama session keepalive error: {e}")

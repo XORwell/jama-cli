@@ -11,6 +11,7 @@ from loguru import logger
 from jama_cli import __version__
 from jama_cli.commands import (
     attachments,
+    auth,
     baseline,
     config_cmd,
     diff,
@@ -57,6 +58,11 @@ app.add_typer(users.app, name="users")
 app.add_typer(trace.app, name="trace")
 app.add_typer(baseline.app, name="baseline")
 app.add_typer(history.app, name="history")
+
+# Browser-session auth (auth_type=session)
+app.command("login")(auth.login)
+app.command("logout")(auth.logout)
+app.command("status")(auth.status)
 
 
 def version_callback(value: bool) -> None:

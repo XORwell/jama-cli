@@ -13,6 +13,7 @@ from typing import Any
 
 from jama_cli.core.api import JamaApi
 from jama_cli.core.http_client import JamaHttpClient
+from jama_cli.core.session import SessionManager
 
 
 class SyncJamaApi:
@@ -46,6 +47,18 @@ class SyncJamaApi:
             oauth=oauth,
             timeout=timeout,
         )
+        api = JamaApi(http)
+        return cls(api, http)
+
+    @classmethod
+    def from_session(
+        cls,
+        base_url: str,
+        session: SessionManager,
+        timeout: float = 30.0,
+    ) -> SyncJamaApi:
+        """Create a SyncJamaApi that authenticates with a Jama web session."""
+        http = JamaHttpClient(base_url=base_url, session=session, timeout=timeout)
         api = JamaApi(http)
         return cls(api, http)
 

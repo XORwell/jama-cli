@@ -37,6 +37,7 @@ def init_config() -> None:
     console.print("  1. API Key (recommended)")
     console.print("  2. OAuth2 Client Credentials")
     console.print("  3. Username/Password")
+    console.print("  4. Browser session (log in as yourself, works with SSO)")
     auth_choice = console.input("\nAuth type [bold][1][/bold]: ").strip() or "1"
 
     auth_type: str
@@ -59,6 +60,8 @@ def init_config() -> None:
         if not client_id or not client_secret:
             print_error("Client ID and secret are required")
             raise typer.Exit(1)
+    elif auth_choice == "4":
+        auth_type = "session"
     else:
         auth_type = "basic"
         username = console.input("Username: ").strip()
@@ -86,6 +89,10 @@ def init_config() -> None:
     # Save
     save_config(config)
     print_success(f"Configuration saved to {get_config_path()}")
+
+    if auth_type == "session":
+        console.print("Run [bold]jama login[/bold] to sign in.")
+        return
 
     # Offer to test connection
     if console.input("\nTest connection? [bold][Y/n][/bold]: ").strip().lower() != "n":

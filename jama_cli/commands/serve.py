@@ -123,11 +123,16 @@ def serve(
         client_secret=profile.client_secret or "",
     )
 
+    if profile.auth_type == "session" and not stdio:
+        print_error("auth_type 'session' is only supported by the stdio server (--stdio).")
+        raise typer.Exit(1)
+
     if stdio:
         if daemon:
             print_error("Cannot run stdio server in daemon mode")
             raise typer.Exit(1)
-        _run_stdio_server(config)
+        session_settings = profile.session_settings() if profile.auth_type == "session" else None
+        _run_stdio_server(config, session_settings)
     elif daemon:
         _start_daemon(host, port, api_key, ctx.obj.get("profile") if ctx.obj else None)
     else:
@@ -350,15 +355,18 @@ def restart_daemon(
     _start_daemon(host, port, api_key, profile_name)
 
 
-def _run_stdio_server(config: Any) -> None:
+def _run_stdio_server(config: Any, session_settings: Any = None) -> None:
     """Run the stdio MCP server."""
     from jama_mcp_server.core.stdio_server import JamaStdioMCPServer
+
+    # stdout carries the MCP protocol. Logging (loguru) is configured to write
+    # to stderr in main.configure_logging; nothing below may print to stdout.
 
     logger.info(f"Starting Jama MCP server v{__version__} in stdio mode")
 
     async def start_stdio() -> None:
         try:
-            server = JamaStdioMCPServer(config=config)
+            server = JamaStdioMCPServer(config=config, session_settings=session_settings)
             await server.run()
         except KeyboardInterrupt:
             logger.info("Received interrupt, shutting down...")

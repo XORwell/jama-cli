@@ -111,6 +111,126 @@ export JAMA_API_KEY=your-api-key
 export JAMA_PROFILE=production  # Optional: override default profile
 ```
 
+## Browser Session Login (SSO)
+
+`auth_type: session` lets you work as yourself, without API credentials. You log in once in a
+real browser (SSO, MFA and consent screens included), the CLI captures the Jama web session, and
+every REST call reuses it. Everything runs with your own Jama permissions and is attributed to
+you. It works on Jama Cloud and self-hosted instances, with or without SSO.
+
+> **Check with your Jama admin first.** This mode reuses a web session for REST calls. Whether
+> that is acceptable under your organisation's Jama terms and license is for your Jama admin to
+> confirm; this project cannot decide that for you.
+
+### Setup
+
+```bash
+pip install "jama-cli[browser]"     # Playwright is an optional extra
+playwright install chromium         # or use an installed browser: --browser-channel chrome|msedge
+```
+
+```yaml
+# ~/.jama/config.yml
+profiles:
+  me:
+    url: https://company.jamacloud.com    # self-hosted: include the context path, e.g. https://host/contour
+    auth_type: session
+```
+
+or with environment variables: `JAMA_URL=... JAMA_AUTH_TYPE=session`.
+
+### Commands
+
+```bash
+jama login      # Log in and store the session
+jama status     # Base URL, user, age, last validation, and whether the session is valid right now
+jama logout     # Log out on the server (releases the license seat) and delete the stored session
+```
+
+`jama login` options: `--mode browser|form`, `--browser-channel`, `--browser-profile-dir`,
+`--timeout`, `--headful` (skip the silent attempt), `--force`, and `--debug-dir DIR`, which saves a
+screenshot of each login step for diagnosing a failed login (the screenshots can show your user
+name; delete them afterwards).
+
+- **`browser` (default):** uses a persistent browser profile (`~/.jama/browser-profile`), so your
+  identity provider remembers you. Later logins first run headless and are usually silent; only
+  if that needs you (password, MFA) does a window open. Nothing is pre-filled and your password
+  is never read or stored. The SSO button is detected automatically; if your instance uses a
+  different button, set `sso_selectors`.
+- **`form`:** native Jama login without a browser, for non-SSO instances and service accounts.
+  Takes `username`/`password` from the profile or `JAMA_USERNAME`/`JAMA_PASSWORD`. Does not need
+  Playwright.
+
+### How the session is kept
+
+- The session is stored per Jama URL and account in `~/.jama/sessions/` (mode `0600`) and is
+  **shared by every process**: all terminals, IDE windows, agents and MCP servers use the same
+  session. Jama allows one live session per account, so a process whose session stopped working
+  first checks whether another process already logged in again before logging in itself. Logins
+  are serialised with a file lock.
+- There is **no idle logout**. The session ends when you run `jama logout` or when Jama's own
+  idle timeout expires it.
+- **License seat:** on a floating license a session holds a seat until logout or Jama's
+  server-side timeout. Run `jama logout` when you are done.
+- The session file contains your session cookies. Treat it like a password and do not copy it to
+  other machines.
+
+### Settings
+
+Environment variables override the profile.
+
+| Profile key | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `auth_type: session` | `JAMA_AUTH_TYPE=session` | | Select this mode |
+| `login_mode` | `JAMA_LOGIN_MODE` | `browser` | `browser` or `form` |
+| `login_interactive` | `JAMA_LOGIN_INTERACTIVE` | `auto` | See below |
+| `login_timeout` | `JAMA_LOGIN_TIMEOUT` | `300` | Seconds to wait for a login |
+| `browser_channel` | `JAMA_BROWSER_CHANNEL` | bundled Chromium | `chrome`, `msedge`, ... |
+| `browser_profile_dir` | `JAMA_BROWSER_PROFILE_DIR` | `~/.jama/browser-profile` | Persistent browser profile |
+| `sso_selectors` | `JAMA_SSO_SELECTORS` | `#loginWithSSOButton`, `input[name="submitWithSSO"]` | CSS selectors of the SSO button (list; comma-separated in the env var) |
+| `session_file` | `JAMA_SESSION_FILE` | `~/.jama/sessions/<hash>.json` | Session store file |
+| `login_debug_dir` | `JAMA_LOGIN_DEBUG_DIR` | off | Screenshots of each login step |
+| `session_keepalive_minutes` | `JAMA_SESSION_KEEPALIVE_MINUTES` | `0` (off) | MCP server only: one cheap request every N minutes |
+| | `JAMA_SESSION_DIR` | `~/.jama/sessions` | Directory for session files |
+
+`login_interactive` controls what happens when a command or the MCP server finds no valid session:
+
+- `auto` (default): try a silent, headless login; open a browser window only if that is not enough.
+- `always`: open a browser window directly whenever a login is needed.
+- `never`: never start a browser; fail with "run `jama login`". Use this on servers and in CI.
+  (`form` logins need no browser and still work.)
+
+### MCP server
+
+`jama serve --stdio` supports session auth (the HTTP server mode does not). Two extra tools are
+available: `get_session_status` (never returns cookies or tokens) and `logout_session` (releases
+the seat). All logs go to stderr; stdout carries only the MCP protocol.
+
+```json
+{
+  "mcpServers": {
+    "jama": {
+      "command": "jama",
+      "args": ["serve", "--stdio"],
+      "env": {
+        "JAMA_URL": "https://company.jamacloud.com",
+        "JAMA_AUTH_TYPE": "session",
+        "JAMA_LOGIN_INTERACTIVE": "never"
+      }
+    }
+  }
+}
+```
+
+With `never`, run `jama login` in a terminal once; the server picks the session up from the store.
+
+### WSL, SSH and containers
+
+The browser opens **on the machine where the process runs**. In WSL that is the Linux side (it
+needs WSLg or another display); over SSH it is the remote host, not your laptop. If that machine
+has no display, log in with `--mode form` where possible, or run the tool locally. In containers
+Chromium is started with `--no-sandbox --disable-dev-shm-usage` automatically.
+
 ## CLI Commands
 
 ### Projects

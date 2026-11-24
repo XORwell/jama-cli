@@ -26,6 +26,8 @@ from jama_cli.core.exceptions import (
     TooManyRequestsException,
     UnauthorizedException,
 )
+from jama_cli.core.session import LOGIN_HINT, SessionManager, is_session_rejected
+from jama_cli.core.session_store import StoredSession
 
 # Jama API max page size
 MAX_PAGE_SIZE = 50
@@ -34,19 +36,23 @@ MAX_PAGE_SIZE = 50
 class JamaHttpClient:
     """Async HTTP client for the Jama REST API.
 
-    Supports three auth modes:
+    Supports four auth modes:
     - basic: username + password
     - api_key: API key as username, empty password
     - oauth: client_credentials grant with proactive token refresh
+    - session: cookies of a Jama web session (pass ``session``), shared with
+      other processes through the session store and repaired when it dies
     """
 
     def __init__(
         self,
         base_url: str,
-        credentials: tuple[str, str],
+        credentials: tuple[str, str] = ("", ""),
         oauth: bool = False,
         timeout: float = 30.0,
         page_size: int = MAX_PAGE_SIZE,
+        session: SessionManager | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_url = f"{self._base_url}/rest/v1/"
@@ -59,12 +65,17 @@ class JamaHttpClient:
         self._token_expires_at: float = 0
 
         # httpx client (created lazily or via context manager)
-        auth = None if oauth else httpx.BasicAuth(*credentials)
+        self._session = session
+        auth = None if (oauth or session) else httpx.BasicAuth(*credentials)
         self._client = httpx.AsyncClient(
             base_url=self._api_url,
             auth=auth,
             timeout=timeout,
             headers={"Accept": "application/json"},
+            transport=transport,
+            # Redirects stay manual: in session mode a redirect to the login
+            # page is how a dead session shows up.
+            follow_redirects=False,
         )
 
     # --- Lifecycle ---
@@ -148,7 +159,10 @@ class JamaHttpClient:
                     headers["Authorization"] = f"Bearer {self._token}"
                     kwargs["headers"] = headers
 
-                response = await self._client.request(method, path, **kwargs)
+                if self._session is not None:
+                    response = await self._session_request(method, path, **kwargs)
+                else:
+                    response = await self._client.request(method, path, **kwargs)
 
                 if response.status_code == 429:
                     if attempt < max_retries:
@@ -170,6 +184,70 @@ class JamaHttpClient:
 
         # Should not reach here, but satisfy type checker
         raise CoreException("Max retries exceeded")
+
+    # --- Session auth ---
+
+    @property
+    def session(self) -> SessionManager | None:
+        """The session manager when running with ``auth_type=session``."""
+        return self._session
+
+    async def _send_with_session(
+        self, session: StoredSession, method: str, path: str, **kwargs: Any
+    ) -> httpx.Response:
+        """Send one request authenticated with the given web session."""
+        headers = dict(kwargs.pop("headers", None) or {})
+        headers.update(session.auth_headers())
+        try:
+            return await self._client.request(method, path, headers=headers, **kwargs)
+        finally:
+            # The session object is the single source of truth for cookies;
+            # never let httpx replay cookies it collected on its own.
+            self._client.cookies.clear()
+
+    async def _session_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Send a request with the web session, repairing the session if needed.
+
+        On a session-rejected response the following steps run in order, each at
+        most once per request:
+
+        1. writes only: refresh the CSRF token with one GET and retry;
+        2. re-read the store; if another process wrote a newer session, retry;
+        3. take the lock, re-read again, and only if the store still holds the
+           same dead session, log in again, save and retry.
+
+        If that still fails, an UnauthorizedException tells the user to run
+        ``jama login``. There is no loop.
+        """
+        manager = self._session
+        assert manager is not None
+
+        session = manager.current()
+        if session is not None:
+            response = await self._send_with_session(session, method, path, **kwargs)
+            if not is_session_rejected(response):
+                return response
+
+            # 1. A write rejected on a live session is a stale CSRF token.
+            if method.upper() != "GET" and await manager.refresh_csrf(session):
+                # The GET proved the session is alive, so logging in again could
+                # not help: whatever the retry returns is the answer.
+                return await self._send_with_session(session, method, path, **kwargs)
+
+            # 2. Another process may already have logged in again.
+            newer = manager.adopt_newer(session)
+            if newer is not None:
+                session = newer
+                response = await self._send_with_session(session, method, path, **kwargs)
+                if not is_session_rejected(response):
+                    return response
+
+        # 3. Double-checked re-login under the cross-process lock.
+        session = await manager.recover(session)
+        response = await self._send_with_session(session, method, path, **kwargs)
+        if is_session_rejected(response):
+            raise UnauthorizedException(LOGIN_HINT, status_code=401)
+        return response
 
     @staticmethod
     def _raise_for_status(response: httpx.Response) -> None:
