@@ -113,7 +113,16 @@ user's browser session would otherwise evict each other.
 
 It is wired as a `login_func`, so it feeds `SessionManager.login()` and `recover()` alike: a truly
 dead session (not the CSRF case) is re-read from the browser instead of an interactive login, and
-being non-interactive it honours `login_interactive: never`. Signing out in the browser ends the
+being non-interactive it honours `login_interactive: never`.
+
+`recover()` follows the `source` stored with the session, not only the process's own setting: a
+`browser-firefox` session is replaced by reading Firefox again even in a process that has no
+`session_source` (`SessionManager._recovery_settings()`). Otherwise a session taken over with
+`jama login --from-browser firefox` would, once it ended, be replaced by a login of the tool's
+own in another process (an MCP server, say), which is a second session and can sign the user out
+in the browser. If Firefox has no valid session either, recovery fails with a message; it never
+falls back to a login. Only an explicit `jama login` without `--from-browser` replaces a
+browser-sourced session by one of the tool's own. Signing out in the browser ends the
 shared session for the CLI too, by design.
 
 Runtime target is "CLI/MCP under WSL, browser on the Windows host"; cookie stores are read from

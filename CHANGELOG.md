@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are given
 
 ### Fixed
+- A session taken over with `jama login --from-browser firefox` is now also *renewed* from
+  Firefox in every process that shares it, even one without `session_source` configured
+  (for example an MCP server). Before, such a process logged in on its own once the session
+  ended, which opened a second session and could sign the user out in the browser
 - `jama attachments upload <testRunId> <file>` failed with 404: test runs are not items in
   the REST API (`items/{id}` and `items/{id}/attachments` answer 404 for a test run id). The
   project is now taken from the test run, or from the new `--project` option, and no link is

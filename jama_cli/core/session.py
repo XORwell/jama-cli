@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -532,11 +532,30 @@ class SessionManager:
                     return stored
 
             logger.info("Jama session missing or expired, logging in")
-            session = await self._login_func(self.settings, mode)
+            session = await self._login_func(self._recovery_settings(dead, stored), mode)
             self.store.save(session)
             self._session, self._loaded = session, True
             logger.info(f"Logged in to Jama as {session.username or 'unknown user'}")
             return session
+
+    def _recovery_settings(
+        self, dead: StoredSession | None, stored: StoredSession | None
+    ) -> SessionSettings:
+        """Settings for replacing a dead session: the way it was obtained wins.
+
+        A session that was taken over from the user's browser is replaced by
+        reading the browser again, even in a process whose own configuration
+        has no ``session_source`` (for example an MCP server started without
+        ``JAMA_SESSION_SOURCE``). Logging in here instead would open a second
+        Jama session and could sign the user out in the browser.
+        """
+        if self.settings.session_source:
+            return self.settings
+        for candidate in (stored, dead):
+            if candidate is not None and candidate.from_browser:
+                logger.debug("The dead session came from the browser; reading it again there")
+                return replace(self.settings, session_source=candidate.source)
+        return self.settings
 
     async def login(self, interactive: str = "auto", force: bool = False) -> StoredSession:
         """Explicit login (``jama login``). Reuses a still-valid session unless forced."""

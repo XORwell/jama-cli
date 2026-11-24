@@ -481,3 +481,96 @@ class TestLoginSourcedLogoutIsUnchanged:
         result = await SessionManager(settings, transport=fake.transport()).logout()
         assert result.server_session_ended is True
         assert not fake.is_authenticated(sid)
+
+
+# ---------------------------------------------------------------------------
+# Recovery follows where the session came from, not the process's own settings
+# ---------------------------------------------------------------------------
+
+
+class TestRecoveryFollowsTheStoredSource:
+    """`--from-browser` applies to one call; later processes must not log in on their own."""
+
+    def _settings(self, tmp_path: Path, source: str | None) -> SessionSettings:
+        return SessionSettings(
+            base_url=BASE,
+            username="alice",
+            password="s3cret-pw-alice",
+            login_mode="form",  # a login of its own would be possible
+            session_source=source,
+            browser_cookies_path=tmp_path / "ff" / "cookies.sqlite",
+            session_file=tmp_path / "sessions" / "s.json",
+        )
+
+    def _browser_has(self, settings: SessionSettings, sid: str, csrf: str) -> None:
+        db = settings.browser_cookies_path
+        assert db is not None
+        db.parent.mkdir(parents=True, exist_ok=True)
+        make_firefox_db(db, [("JSESSIONID", sid, HOST), ("jama-csrf-token", csrf, HOST)])
+
+    async def test_other_process_without_session_source_rereads_the_browser(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJama()
+        first = self._settings(tmp_path, "firefox")
+        self._browser_has(first, *fake.plant_session("alice"))
+        await SessionManager(first, transport=fake.transport()).login()
+
+        # The session ends; the user signs in again in the browser.
+        fake.kill_sessions()
+        new_sid, new_csrf = fake.plant_session("alice")
+        self._browser_has(first, new_sid, new_csrf)
+
+        # E.g. the MCP server: same store, but no session_source configured.
+        other = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        from jama_cli.core.http_client import JamaHttpClient
+
+        async with JamaHttpClient(BASE, session=other, transport=fake.transport()) as client:
+            item = await client.get("items/1")
+
+        assert item["data"]["id"] == 1
+        assert fake.login_count == 0  # no login of its own, no second session
+        stored = SessionStore(first.store_path).load()
+        assert stored is not None
+        assert stored.cookie_value("JSESSIONID") == new_sid
+        assert stored.source == "browser-firefox"
+
+    async def test_no_fallback_to_an_own_login_when_the_browser_is_signed_out(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJama()
+        first = self._settings(tmp_path, "firefox")
+        self._browser_has(first, *fake.plant_session("alice"))
+        await SessionManager(first, transport=fake.transport()).login()
+        fake.kill_sessions()  # signed out everywhere; the browser still holds dead cookies
+
+        other = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        with pytest.raises(Exception) as exc:
+            await other.recover(other.current())
+
+        assert "Sign in to Jama in the browser" in str(exc.value)
+        assert fake.login_count == 0
+
+    async def test_own_login_session_is_recovered_by_login_as_before(self, tmp_path: Path) -> None:
+        fake = FakeJama()
+        settings = self._settings(tmp_path, None)
+        manager = SessionManager(settings, transport=fake.transport())
+        await manager.login()
+        fake.kill_sessions()
+
+        recovered = await manager.recover(manager.current())
+
+        assert fake.login_count == 2 and recovered.source == "form"
+
+    async def test_explicit_login_replaces_a_browser_session_on_purpose(
+        self, tmp_path: Path
+    ) -> None:
+        fake = FakeJama()
+        first = self._settings(tmp_path, "firefox")
+        self._browser_has(first, *fake.plant_session("alice"))
+        await SessionManager(first, transport=fake.transport()).login()
+
+        own = SessionManager(self._settings(tmp_path, None), transport=fake.transport())
+        session = await own.login(force=True)
+
+        assert session.source == "form" and fake.login_count == 1

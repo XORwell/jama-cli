@@ -179,7 +179,12 @@ jama login --from-browser firefox --browser-cookie-profile "abcd1234.default-rel
 jama login --from-browser firefox --browser-cookies-path "/mnt/c/Users/me/AppData/Roaming/Mozilla/Firefox"
 ```
 
-Set it permanently with `session_source: firefox` (env `JAMA_SESSION_SOURCE`). It is
+`--from-browser` applies to that one call. The stored session remembers that it came from
+Firefox, so when it later ends, every process using it (other terminals, the MCP server)
+reads Firefox again instead of logging in on its own, whatever its own settings say. To
+make *every* login go through Firefox, including the first one and after `jama logout`, set
+`session_source: firefox` in the profile or `JAMA_SESSION_SOURCE=firefox` in the
+environment, also in the `env` block of the MCP server. Reading the browser is
 non-interactive, so it works with `login_interactive: never`. Sign in to Jama in Firefox first; if
 you sign out there, the shared session ends for the CLI too (that coupling is the point).
 
