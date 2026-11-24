@@ -76,6 +76,23 @@ def serve(
         bool,
         typer.Option("--daemon", "-d", help="Run server in background"),
     ] = False,
+    allow_local_paths: Annotated[
+        bool,
+        typer.Option(
+            "--allow-local-paths",
+            envvar="JAMA_MCP_ALLOW_LOCAL_PATHS",
+            help="HTTP mode: let attachment tools read/write files on this machine by path "
+            "(default: off, files are sent as base64). Needs --local-path-dir",
+        ),
+    ] = False,
+    local_path_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--local-path-dir",
+            envvar="JAMA_MCP_LOCAL_PATH_DIR",
+            help="HTTP mode: the one directory such file paths are confined to",
+        ),
+    ] = None,
 ) -> None:
     """Start the MCP server.
 
@@ -123,15 +140,33 @@ def serve(
         client_secret=profile.client_secret or "",
     )
 
+    if profile.auth_type == "session" and not stdio:
+        print_error("auth_type 'session' is only supported by the stdio server (--stdio).")
+        raise typer.Exit(1)
+
+    if allow_local_paths and not local_path_dir and not stdio:
+        print_error(
+            "--allow-local-paths needs --local-path-dir (the directory to confine paths to)."
+        )
+        raise typer.Exit(1)
+
     if stdio:
         if daemon:
             print_error("Cannot run stdio server in daemon mode")
             raise typer.Exit(1)
-        _run_stdio_server(config)
+        session_settings = profile.session_settings() if profile.auth_type == "session" else None
+        _run_stdio_server(config, session_settings)
     elif daemon:
-        _start_daemon(host, port, api_key, ctx.obj.get("profile") if ctx.obj else None)
+        _start_daemon(
+            host,
+            port,
+            api_key,
+            ctx.obj.get("profile") if ctx.obj else None,
+            allow_local_paths,
+            local_path_dir,
+        )
     else:
-        _run_http_server(config, host, port, api_key)
+        _run_http_server(config, host, port, api_key, allow_local_paths, local_path_dir)
 
 
 @app.command("start")
@@ -166,6 +201,8 @@ def _start_daemon(
     port: int,
     api_key: str | None,
     profile_name: str | None,
+    allow_local_paths: bool = False,
+    local_path_dir: Path | None = None,
 ) -> None:
     """Start the server as a background daemon."""
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -177,6 +214,10 @@ def _start_daemon(
         cmd.extend(["--api-key", api_key])
     if profile_name:
         cmd.extend(["--profile", profile_name])
+    if allow_local_paths:
+        cmd.append("--allow-local-paths")
+    if local_path_dir:
+        cmd.extend(["--local-path-dir", str(local_path_dir)])
 
     # Write startup info to log file
     with open(LOG_FILE, "a") as log_init:
@@ -350,15 +391,18 @@ def restart_daemon(
     _start_daemon(host, port, api_key, profile_name)
 
 
-def _run_stdio_server(config: Any) -> None:
+def _run_stdio_server(config: Any, session_settings: Any = None) -> None:
     """Run the stdio MCP server."""
     from jama_mcp_server.core.stdio_server import JamaStdioMCPServer
+
+    # stdout carries the MCP protocol. Logging (loguru) is configured to write
+    # to stderr in main.configure_logging; nothing below may print to stdout.
 
     logger.info(f"Starting Jama MCP server v{__version__} in stdio mode")
 
     async def start_stdio() -> None:
         try:
-            server = JamaStdioMCPServer(config=config)
+            server = JamaStdioMCPServer(config=config, session_settings=session_settings)
             await server.run()
         except KeyboardInterrupt:
             logger.info("Received interrupt, shutting down...")
@@ -372,7 +416,14 @@ def _run_stdio_server(config: Any) -> None:
         logger.info("Server stopped")
 
 
-def _run_http_server(config: Any, host: str, port: int, api_key: str | None) -> None:
+def _run_http_server(
+    config: Any,
+    host: str,
+    port: int,
+    api_key: str | None,
+    allow_local_paths: bool = False,
+    local_path_dir: Path | None = None,
+) -> None:
     """Run the HTTP MCP server in foreground."""
     from jama_mcp_server.core.server import JamaMCPServer
 
@@ -386,6 +437,8 @@ def _run_http_server(config: Any, host: str, port: int, api_key: str | None) -> 
             host=host,
             port=port,
             api_key=api_key,
+            allow_local_paths=allow_local_paths,
+            local_path_dir=local_path_dir,
         )
 
         try:

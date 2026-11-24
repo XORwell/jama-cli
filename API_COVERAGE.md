@@ -136,16 +136,13 @@ All 70 operations accessible via:
 - Full OpenAPI/Swagger documentation at `/api/docs`
 
 ### stdio MCP (stdio_server.py)
-23 key operations optimized for AI agents:
-- All core CRUD operations
-- Baselines (2 operations)
-- Users (2 operations)
-- Item versions (1 operation)
-- Item tags (2 operations)
-- Workflow transitions (1 operation)
-- Attachments (1 operation)
-- Filters (1 operation)
-- Plus all existing 13 operations
+Every method of the async API (`jama_cli/core/api.py`) has a tool, except
+`post_item_attachment`. Run the server and call `tools/list` for the current set.
+
+The attachment file operations (`post_project_attachment`, `put_attachment_file`,
+`post_item_attachment`, `get_attachment_file`, `get_file_by_url`) are not exposed one by
+one but through the tools `upload_attachment`, `attach_screenshot_to_test_run` and
+`download_attachment`. `update_test_run` is a read-modify-write on top of `put_test_run`.
 
 ### SSE Streaming
 Real-time event streaming via:

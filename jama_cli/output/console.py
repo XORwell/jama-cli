@@ -31,8 +31,17 @@ def print_success(message: str) -> None:
 
 
 def print_info(message: str) -> None:
-    """Print an info message."""
-    console.print(f"[bold blue]Info:[/bold blue] {message}")
+    """Print an info message to stderr, so stdout stays machine-readable."""
+    error_console.print(f"[bold blue]Info:[/bold blue] {message}")
+
+
+def print_hint(message: str) -> None:
+    """Print a dim side note (progress, limits, tips) to stderr.
+
+    Anything that is not the requested data goes to stderr; otherwise
+    ``jama -o json ... | jq`` would receive text that is not JSON.
+    """
+    error_console.print(f"[dim]{message}[/dim]")
 
 
 def confirm(message: str, default: bool = False) -> bool:

@@ -6,15 +6,23 @@ import contextlib
 import hashlib
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from loguru import logger
 
+from jama_cli.core.attachments import (
+    AttachmentService,
+    UploadCache,
+    UploadedAttachment,
+    default_upload_cache_path,
+    embed_image_html,
+)
 from jama_cli.core.sync_wrapper import SyncJamaApi
+from jama_cli.core.testruns import ActualResultsUpdate, ScreenshotsResult, TestRunService
 from jama_cli.models import JamaProfile
 
 # Default cache directory
@@ -230,6 +238,13 @@ class JamaClient:
         host_hash = hashlib.sha256(profile.url.encode()).hexdigest()[:8]
         self._disk_cache = DiskCache(namespace=host_hash) if use_disk_cache else None
 
+        # Attachments: local map of uploads (avoids duplicates) and size limit
+        self._use_upload_cache = use_disk_cache
+        self._upload_cache_path: Path | None = None
+        self.max_attachment_size: int | None = None
+        self._attachments: AttachmentService | None = None
+        self._test_runs: TestRunService | None = None
+
         # Cached relationship maps for bulk operations
         self._relationship_map: dict[int, dict[str, list[dict[str, Any]]]] | None = None
         self._relationship_map_project: int | None = None
@@ -256,6 +271,13 @@ class JamaClient:
                 base_url=self.profile.url,
                 credentials=(self.profile.username, self.profile.password),
                 oauth=False,
+            )
+        elif self.profile.auth_type == "session":
+            from jama_cli.core.session import SessionManager
+
+            self._api = SyncJamaApi.from_session(
+                base_url=self.profile.url,
+                session=SessionManager(self.profile.session_settings()),
             )
         else:
             raise ValueError(f"Unknown auth type: {self.profile.auth_type}")
@@ -904,40 +926,200 @@ class JamaClient:
         api = self._ensure_connected()
         return api.get_item_tags(item_id)
 
-    def download_attachment(self, attachment_id: int, output_path: Path) -> None:
-        """Download attachment file content.
+    def _attachment_service(self) -> AttachmentService:
+        """Attachment operations bound to this connection (created on first use)."""
+        if self._attachments is None:
+            api = self._ensure_connected()
+            cache = (
+                UploadCache(self._upload_cache_path or default_upload_cache_path(self.profile.url))
+                if self._use_upload_cache
+                else None
+            )
+            self._attachments = AttachmentService(
+                api.async_api, cache=cache, max_file_size=self.max_attachment_size
+            )
+        return self._attachments
 
-        Note: The py-jama-rest-client doesn't have a direct download method,
-        so this gets the attachment URL and downloads via the file URL.
-        """
-        api = self._ensure_connected()
-        attachment = api.get_attachment(attachment_id)
+    def _test_run_service(self) -> TestRunService:
+        """Test run edits bound to this connection (created on first use)."""
+        if self._test_runs is None:
+            attachments = self._attachment_service()
+            self._test_runs = TestRunService(self._ensure_connected().async_api, attachments)
+        return self._test_runs
 
-        # Get the file URL from attachment metadata
-        _file_url = attachment.get("fileName")  # This may need adjustment based on API response
-
-        # For now, we store the metadata - actual file download would need
-        # direct API access to the file endpoint
-        # This is a placeholder for the attachment metadata
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
-            import json
-
-            json.dump(attachment, f, indent=2)
-
-    def upload_attachment(
+    def create_attachment(
         self,
-        item_id: int,
-        file_path: Path,
+        project_id: int,
+        file: Path | str | bytes,
+        name: str | None = None,
+        description: str = "",
+        file_name: str | None = None,
     ) -> int:
-        """Upload an attachment to an item.
+        """Create an attachment in a project and upload its file.
 
         Args:
-            item_id: Item to attach file to
-            file_path: Path to the file to upload
+            project_id: Project that owns the attachment
+            file: Path to the file, or its bytes (then ``file_name`` is required)
+            name: Attachment name (default: the file name)
+            description: Attachment description
+            file_name: File name to store (default: the name of ``file``)
 
         Returns:
             The ID of the created attachment
         """
+        service = self._attachment_service()
+        attachment_id: int = self._ensure_connected().run(
+            service.create_attachment(project_id, file, name, description, file_name)
+        )
+        return attachment_id
+
+    def link_attachment(self, item_id: int, attachment_id: int) -> None:
+        """Link an existing attachment to an item (shows on its Attachments tab)."""
+        service = self._attachment_service()
+        self._ensure_connected().run(service.link_attachment(item_id, attachment_id))
+
+    def upload_attachment(
+        self,
+        item_id: int,
+        file_path: Path | str | bytes,
+        name: str | None = None,
+        description: str = "",
+        file_name: str | None = None,
+        project_id: int | None = None,
+        link: bool = True,
+        verify: bool = True,
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
+        """Upload a file as an attachment of an item.
+
+        Creates the attachment in the item's project, uploads the bytes, links
+        it to the item, resolves the stored file's id and checks that the embed
+        URL serves the file.
+
+        Args:
+            item_id: Item to attach the file to
+            file_path: Path to the file, or its bytes (then ``file_name`` is required)
+            name: Attachment name (default: the file name)
+            description: Attachment description
+            file_name: File name to store (default: the name of the file)
+            project_id: Project for the attachment (default: the item's project)
+            link: Link the attachment to the item's Attachments tab
+            verify: Check that the embed URL loads
+            use_cache: Reuse an earlier upload of the same bytes to the same project
+
+        Returns:
+            Dict with ``attachment_id``, ``file_id`` and ``embed_url`` (plus
+            ``name``, ``project_id``, ``linked``, ``reused``,
+            ``via_internal_endpoint`` and ``warnings``)
+        """
+        service = self._attachment_service()
+        uploaded: UploadedAttachment = self._ensure_connected().run(
+            service.upload_attachment(
+                item_id,
+                file_path,
+                name=name,
+                description=description,
+                file_name=file_name,
+                project_id=project_id,
+                link=link,
+                verify=verify,
+                use_cache=use_cache,
+            )
+        )
+        return uploaded.to_dict()
+
+    def download_attachment(self, attachment_id: int, output_path: Path) -> Path:
+        """Download an attachment's file to ``output_path``. Returns the path written."""
+        service = self._attachment_service()
+        path: Path = self._ensure_connected().run(
+            service.download_attachment(attachment_id, Path(output_path))
+        )
+        return path
+
+    def download_embedded(self, url: str, output_path: Path) -> Path:
+        """Download an embedded file (e.g. an inline image) by its embed URL."""
+        service = self._attachment_service()
+        path: Path = self._ensure_connected().run(service.download_embedded(url, Path(output_path)))
+        return path
+
+    @staticmethod
+    def embed_image_html(embed_url: str, alt: str = "") -> str:
+        """``<img>`` element for an embed URL, with ``src`` and ``alt`` HTML-escaped."""
+        return embed_image_html(embed_url, alt)
+
+    # =========================================================================
+    # Test run results
+    # =========================================================================
+
+    def get_test_run(self, test_run_id: int) -> dict[str, Any]:
+        """Get a test run with its steps."""
         api = self._ensure_connected()
-        return api.post_item_attachment(item_id, str(file_path))
+        return api.get_test_run(test_run_id)
+
+    def append_to_actual_results(
+        self,
+        test_run_id: int,
+        html: str,
+        step: int | None = None,
+        mode: Literal["append", "replace"] = "append",
+    ) -> dict[str, Any]:
+        """Add HTML to the actual results of a test run or of one of its steps.
+
+        Args:
+            test_run_id: Test run ID
+            html: HTML to add
+            step: 1-based step index; ``None`` targets the run-level field
+            mode: ``"append"`` keeps the existing HTML; ``"replace"`` replaces the
+                targeted field (and nothing else)
+        """
+        service = self._test_run_service()
+        update: ActualResultsUpdate = self._ensure_connected().run(
+            service.append_to_actual_results(test_run_id, html, step=step, mode=mode)
+        )
+        return update.to_dict()
+
+    def attach_screenshots_to_test_run(
+        self,
+        test_run_id: int,
+        files: Sequence[Path | str | bytes | tuple[str, bytes]],
+        step: int | None = None,
+        caption: str | None = None,
+        project_id: int | None = None,
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
+        """Upload images and embed them in the actual results of a test run or step.
+
+        Args:
+            test_run_id: Test run ID
+            files: Paths, or ``(file name, bytes)`` pairs
+            step: 1-based step index; ``None`` targets the run-level field
+            caption: Plain text shown above each image
+            project_id: Project for the attachments (default: the run's project)
+            use_cache: Reuse earlier uploads of the same bytes
+        """
+        service = self._test_run_service()
+        result: ScreenshotsResult = self._ensure_connected().run(
+            service.attach_screenshots_to_test_run(
+                test_run_id,
+                files,
+                step=step,
+                caption=caption,
+                project_id=project_id,
+                use_cache=use_cache,
+            )
+        )
+        return result.to_dict()
+
+    def update_test_run(
+        self,
+        test_run_id: int,
+        data: dict[str, Any] | None = None,
+        step: int | None = None,
+        step_fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Partial, read-modify-write update of a test run (never wipes other steps)."""
+        service = self._test_run_service()
+        result: dict[str, Any] = self._ensure_connected().run(
+            service.update_test_run(test_run_id, data, step=step, step_fields=step_fields)
+        )
+        return result

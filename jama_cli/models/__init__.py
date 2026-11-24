@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+if TYPE_CHECKING:
+    from jama_cli.core.session import SessionSettings
 
 
 class JamaProfile(BaseModel):
@@ -16,7 +20,7 @@ class JamaProfile(BaseModel):
     )
 
     url: str = Field(..., description="Jama instance URL", min_length=1)
-    auth_type: Literal["api_key", "oauth", "basic"] = Field(
+    auth_type: Literal["api_key", "oauth", "basic", "session"] = Field(
         "api_key", description="Authentication type"
     )
 
@@ -30,6 +34,46 @@ class JamaProfile(BaseModel):
     # Basic auth
     username: str | None = Field(default=None, description="Jama username")
     password: str | None = Field(default=None, description="Jama password")
+
+    # Session auth (browser / SSO web session). username/password above are
+    # only used by the "form" login mode.
+    session_file: str | None = Field(default=None, description="Session store file")
+    login_mode: Literal["browser", "form"] = Field(default="browser", description="How to log in")
+    login_timeout: float = Field(default=300.0, description="Seconds to wait for a login", gt=0)
+    login_interactive: Literal["auto", "always", "never"] = Field(
+        default="auto", description="Whether a browser window may be opened for a login"
+    )
+    browser_channel: str | None = Field(default=None, description="chrome, msedge, ...")
+    browser_profile_dir: str | None = Field(
+        default=None, description="Persistent browser profile directory"
+    )
+    sso_selectors: list[str] | None = Field(
+        default=None, description="CSS selectors of the SSO login button"
+    )
+    login_debug_dir: str | None = Field(
+        default=None, description="Directory for login step screenshots"
+    )
+    session_keepalive_minutes: float = Field(
+        default=0.0, description="Keepalive interval for the MCP server (0 = off)", ge=0
+    )
+    session_source: str | None = Field(
+        default=None,
+        description="Reuse the browser's session: firefox (None = log in)",
+    )
+    browser_cookie_profile: str | None = Field(
+        default=None, description="Browser profile to read cookies from (default: the main one)"
+    )
+    browser_cookies_path: str | None = Field(
+        default=None, description="Override path to the browser cookie store / User Data dir"
+    )
+
+    @field_validator("sso_selectors", mode="before")
+    @classmethod
+    def split_selectors(cls, v: Any) -> Any:
+        """Accept a comma-separated string (env var) as well as a list."""
+        if isinstance(v, str):
+            return [part.strip() for part in v.split(",") if part.strip()] or None
+        return v
 
     @field_validator("url")
     @classmethod
@@ -69,7 +113,36 @@ class JamaProfile(BaseModel):
             return bool(self.client_id and self.client_secret)
         elif self.auth_type == "basic":
             return bool(self.username and self.password)
+        elif self.auth_type == "session":
+            # The credential is the web session in the store; form login
+            # additionally needs username/password, checked at login time.
+            return True
         return False
+
+    def session_settings(self) -> SessionSettings:
+        """Build the settings for ``auth_type=session`` from this profile."""
+        from jama_cli.core.session import DEFAULT_SSO_SELECTORS, SessionSettings
+
+        def as_path(value: str | None) -> Path | None:
+            return Path(value).expanduser() if value else None
+
+        return SessionSettings(
+            base_url=self.url,
+            username=self.username,
+            password=self.password,
+            login_mode=self.login_mode,
+            login_timeout=self.login_timeout,
+            login_interactive=self.login_interactive,
+            browser_channel=self.browser_channel,
+            browser_profile_dir=as_path(self.browser_profile_dir),
+            sso_selectors=tuple(self.sso_selectors or DEFAULT_SSO_SELECTORS),
+            debug_dir=as_path(self.login_debug_dir),
+            session_file=as_path(self.session_file),
+            keepalive_minutes=self.session_keepalive_minutes,
+            session_source=self.session_source,
+            browser_cookie_profile=self.browser_cookie_profile,
+            browser_cookies_path=as_path(self.browser_cookies_path),
+        )
 
 
 class JamaConfig(BaseModel):

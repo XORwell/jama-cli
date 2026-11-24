@@ -10,6 +10,23 @@ from loguru import logger
 
 from jama_cli.models import JamaConfig, JamaProfile
 
+# Session-auth settings: profile key -> environment variable. Like the
+# credential variables, these override the config file.
+SESSION_ENV_VARS = {
+    "session_file": "JAMA_SESSION_FILE",
+    "login_mode": "JAMA_LOGIN_MODE",
+    "login_timeout": "JAMA_LOGIN_TIMEOUT",
+    "login_interactive": "JAMA_LOGIN_INTERACTIVE",
+    "browser_channel": "JAMA_BROWSER_CHANNEL",
+    "browser_profile_dir": "JAMA_BROWSER_PROFILE_DIR",
+    "sso_selectors": "JAMA_SSO_SELECTORS",
+    "login_debug_dir": "JAMA_LOGIN_DEBUG_DIR",
+    "session_keepalive_minutes": "JAMA_SESSION_KEEPALIVE_MINUTES",
+    "session_source": "JAMA_SESSION_SOURCE",
+    "browser_cookie_profile": "JAMA_BROWSER_COOKIE_PROFILE",
+    "browser_cookies_path": "JAMA_BROWSER_COOKIES_PATH",
+}
+
 # Default config location
 CONFIG_DIR = Path.home() / ".jama"
 CONFIG_FILE = CONFIG_DIR / "config.yml"
@@ -110,6 +127,13 @@ def save_config(config: JamaConfig) -> None:
             profile_data["username"] = profile.username
         if profile.password:
             profile_data["password"] = profile.password
+        if profile.auth_type == "session":
+            # Only non-default session settings are written back.
+            defaults = JamaProfile.model_fields
+            for key in SESSION_ENV_VARS:
+                value = getattr(profile, key)
+                if value is not None and value != defaults[key].default:
+                    profile_data[key] = value
 
         data["profiles"][name] = profile_data
 
@@ -164,8 +188,11 @@ def get_profile_or_env(profile_name: str | None = None) -> JamaProfile | None:
         username = os.environ.get("JAMA_USERNAME")
         password = os.environ.get("JAMA_PASSWORD")
 
-        # Determine auth type
-        if api_key:
+        # Determine auth type. JAMA_AUTH_TYPE=session selects the browser-session
+        # mode explicitly; without it the credentials decide, as before.
+        if os.environ.get("JAMA_AUTH_TYPE", "").strip().lower() == "session":
+            auth_type = "session"
+        elif api_key:
             auth_type = "api_key"
         elif client_id and client_secret:
             auth_type = "oauth"
@@ -175,19 +202,35 @@ def get_profile_or_env(profile_name: str | None = None) -> JamaProfile | None:
             auth_type = None
 
         if auth_type:
-            return JamaProfile(
-                url=jama_url,
-                auth_type=auth_type,
-                api_key=api_key,
-                client_id=client_id,
-                client_secret=client_secret,
-                username=username,
-                password=password,
+            return _apply_session_env(
+                JamaProfile(
+                    url=jama_url,
+                    auth_type=auth_type,
+                    api_key=api_key,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    username=username,
+                    password=password,
+                )
             )
 
     # Fall back to config file
     profile = get_profile(profile_name)
-    if profile and profile.has_valid_credentials():
-        return profile
+    if profile and profile.auth_type == "session":
+        return _apply_session_env(profile)
 
     return profile
+
+
+def _apply_session_env(profile: JamaProfile) -> JamaProfile:
+    """Overlay JAMA_* session settings from the environment onto a profile."""
+    if profile.auth_type != "session":
+        return profile
+    overrides = {
+        key: os.environ[env_var]
+        for key, env_var in SESSION_ENV_VARS.items()
+        if os.environ.get(env_var)
+    }
+    if not overrides:
+        return profile
+    return JamaProfile(**{**profile.model_dump(), **overrides})

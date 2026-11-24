@@ -22,7 +22,7 @@ jama config init
 # Use
 jama projects list
 jama items list 123
-jama items get 456 --output json
+jama -o json items get 456
 ```
 
 ## Features
@@ -50,9 +50,9 @@ jama items get 456 --output json
 ### Output Formats
 ```bash
 jama items list 123                    # Table (default)
-jama items list 123 --output json      # JSON
-jama items list 123 --output csv       # CSV
-jama items list 123 --output yaml      # YAML
+jama -o json items list 123      # JSON
+jama -o csv items list 123       # CSV
+jama -o yaml items list 123      # YAML
 ```
 
 ## Installation
@@ -111,13 +111,198 @@ export JAMA_API_KEY=your-api-key
 export JAMA_PROFILE=production  # Optional: override default profile
 ```
 
+## Browser Session Login (SSO)
+
+`auth_type: session` lets you work as yourself, without API credentials. You log in once in a
+real browser (SSO, MFA and consent screens included), the CLI captures the Jama web session, and
+every REST call reuses it. Everything runs with your own Jama permissions and is attributed to
+you. It works on Jama Cloud and self-hosted instances, with or without SSO.
+
+> **Check with your Jama admin first.** This mode reuses a web session for REST calls. Whether
+> that is acceptable under your organisation's Jama terms and license is for your Jama admin to
+> confirm; this project cannot decide that for you.
+
+### Setup
+
+```bash
+pip install "jama-cli[browser]"     # Playwright is an optional extra
+playwright install chromium         # or use an installed browser: --browser-channel chrome|msedge
+```
+
+```yaml
+# ~/.jama/config.yml
+profiles:
+  me:
+    url: https://company.jamacloud.com    # self-hosted: include the context path, e.g. https://host/contour
+    auth_type: session
+```
+
+or with environment variables: `JAMA_URL=... JAMA_AUTH_TYPE=session`.
+
+### Commands
+
+```bash
+jama login      # Log in and store the session
+jama status     # Base URL, user, age, last validation, and whether the session is valid right now
+jama logout     # Log out on the server (releases the license seat) and delete the stored session
+                # (a session taken over with --from-browser is only removed locally, see below)
+```
+
+`jama login` options: `--mode browser|form`, `--browser-channel`, `--browser-profile-dir`,
+`--timeout`, `--headful` (skip the silent attempt), `--force`, and `--debug-dir DIR`, which saves a
+screenshot of each login step for diagnosing a failed login (the screenshots can show your user
+name; delete them afterwards).
+
+- **`browser` (default):** uses a persistent browser profile (`~/.jama/browser-profile`), so your
+  identity provider remembers you. Later logins first run headless and are usually silent; only
+  if that needs you (password, MFA) does a window open. Nothing is pre-filled and your password
+  is never read or stored. The SSO button is detected automatically; if your instance uses a
+  different button, set `sso_selectors`.
+- **`form`:** native Jama login without a browser, for non-SSO instances and service accounts.
+  Takes `username`/`password` from the profile or `JAMA_USERNAME`/`JAMA_PASSWORD`. Does not need
+  Playwright.
+
+### Reuse your running browser's session (`--from-browser`)
+
+By default `login` opens its own browser profile, which is a **second** Jama session. If your
+instance allows only one session per account, that second login and your real browser session
+evict each other, so you cannot browse and use the CLI/MCP server at the same time.
+
+`--from-browser` avoids that: it reads the Jama session cookies Firefox already has and
+reuses them, so browser, CLI and MCP server share **one** session. No second login, nothing is
+evicted.
+
+```bash
+jama login --from-browser firefox     # read the session from Firefox
+# optional: a non-default Firefox profile, or an explicit cookie-store path
+jama login --from-browser firefox --browser-cookie-profile "abcd1234.default-release"
+jama login --from-browser firefox --browser-cookies-path "<dir with profiles.ini>"
+```
+
+`--from-browser` applies to that one call. The stored session remembers that it came from
+Firefox, so when it later ends, every process using it (other terminals, the MCP server)
+reads Firefox again instead of logging in on its own, whatever its own settings say. To
+make *every* login go through Firefox, including the first one and after `jama logout`, set
+`session_source: firefox` in the profile or `JAMA_SESSION_SOURCE=firefox` in the
+environment, also in the `env` block of the MCP server. Reading the browser is
+non-interactive, so it works with `login_interactive: never`. Sign in to Jama in Firefox first; if
+you sign out there, the shared session ends for the CLI too (that coupling is the point).
+
+**Where Firefox is looked for.** Windows: `%APPDATA%\Mozilla\Firefox`. macOS:
+`~/Library/Application Support/Firefox`. Linux: `~/.mozilla/firefox`, `~/.config/mozilla/firefox`,
+Snap (`~/snap/firefox/common/.mozilla/firefox`) and Flatpak
+(`~/.var/app/org.mozilla.firefox/.mozilla/firefox`). In WSL the Windows host's Firefox and a
+Firefox inside WSL are both considered; with several installs the most recently used profile wins.
+For the Windows side the Windows user is asked of Windows (`cmd.exe`, also when Windows is not on
+`PATH`), not guessed, and the drives are located through `/proc/mounts`, so a custom automount
+root in `/etc/wsl.conf` works. With interop off, the single Windows user that has a Firefox
+profile is used; with several, none is picked. `--browser-cookies-path` overrides all of this.
+
+**Where the cookies are.** Jama's `JSESSIONID` and `jama-csrf-token` are session cookies, and
+Firefox never writes session cookies to `cookies.sqlite`. While Firefox runs they are only in its
+session store, `sessionstore-backups/recovery.jsonlz4`, which Firefox rewrites about every 15
+seconds. So right after signing in to Jama, wait a few seconds before `jama login --from-browser
+firefox`. Private windows, containers and partitioned cookies are ignored. Only the two Jama
+cookies, and only for your configured host, are ever read; copies of locked files are deleted
+right after reading. Firefox keeps cookie values in clear text, so no decryption and no Windows
+component is involved.
+
+**Logout.** A session taken over from Firefox *is* your browser's session. `jama logout` therefore
+only removes the stored copy and tells you so ("Removed the stored session; your browser session
+is still active"). `jama logout --end-server-session` really ends it on the server, which also
+signs you out in the browser. `jama status` shows where the stored session came from (`source`).
+
+**Only Firefox is supported.** Chrome and Edge (version 127 and later) bind the cookie key to
+the Windows user with App-Bound Encryption. Getting around that from outside the browser is what
+credential-stealing malware does, and endpoint security treats it that way, so this tool does not
+attempt it. `--from-browser chrome` or `edge` stops with an error and does **not** fall back to a
+fresh login (which would evict your browser session). Use Firefox, or plain `jama login`.
+
+> Reading another application's browser cookies may be restricted by your company policy or
+> flagged by endpoint security. And, as with any session reuse, confirm with your Jama admin that
+> reusing a web session for REST is allowed on your instance.
+
+### How the session is kept
+
+- The session is stored per Jama URL and account in `~/.jama/sessions/` (mode `0600`) and is
+  **shared by every process**: all terminals, IDE windows, agents and MCP servers use the same
+  session. Jama allows one live session per account, so a process whose session stopped working
+  first checks whether another process already logged in again before logging in itself. Logins
+  are serialised with a file lock.
+- There is **no idle logout**. The session ends when you run `jama logout` or when Jama's own
+  idle timeout expires it.
+- **License seat:** on a floating license a session holds a seat until logout or Jama's
+  server-side timeout. Run `jama logout` when you are done.
+- The session file contains your session cookies. Treat it like a password and do not copy it to
+  other machines.
+
+### Settings
+
+Environment variables override the profile.
+
+| Profile key | Environment variable | Default | Meaning |
+|---|---|---|---|
+| `auth_type: session` | `JAMA_AUTH_TYPE=session` | | Select this mode |
+| `login_mode` | `JAMA_LOGIN_MODE` | `browser` | `browser` or `form` |
+| `login_interactive` | `JAMA_LOGIN_INTERACTIVE` | `auto` | See below |
+| `login_timeout` | `JAMA_LOGIN_TIMEOUT` | `300` | Seconds to wait for a login |
+| `browser_channel` | `JAMA_BROWSER_CHANNEL` | bundled Chromium | `chrome`, `msedge`, ... |
+| `browser_profile_dir` | `JAMA_BROWSER_PROFILE_DIR` | `~/.jama/browser-profile` | Persistent browser profile |
+| `sso_selectors` | `JAMA_SSO_SELECTORS` | `#loginWithSSOButton`, `input[name="submitWithSSO"]` | CSS selectors of the SSO button (list; comma-separated in the env var) |
+| `session_source` | `JAMA_SESSION_SOURCE` | off (log in) | Reuse the browser's session: `firefox` |
+| `browser_cookie_profile` | `JAMA_BROWSER_COOKIE_PROFILE` | main profile | Browser profile to read cookies from |
+| `browser_cookies_path` | `JAMA_BROWSER_COOKIES_PATH` | auto-detected | Path to Firefox's `cookies.sqlite` or the directory with `profiles.ini` |
+| `session_file` | `JAMA_SESSION_FILE` | `~/.jama/sessions/<hash>.json` | Session store file |
+| `login_debug_dir` | `JAMA_LOGIN_DEBUG_DIR` | off | Screenshots of each login step |
+| `session_keepalive_minutes` | `JAMA_SESSION_KEEPALIVE_MINUTES` | `0` (off) | MCP server only: one cheap request every N minutes |
+| | `JAMA_SESSION_DIR` | `~/.jama/sessions` | Directory for session files |
+
+`login_interactive` controls what happens when a command or the MCP server finds no valid session:
+
+- `auto` (default): try a silent, headless login; open a browser window only if that is not enough.
+- `always`: open a browser window directly whenever a login is needed.
+- `never`: never start a browser; fail with "run `jama login`". Use this on servers and in CI.
+  (`form` logins need no browser and still work.)
+
+### MCP server
+
+`jama serve --stdio` supports session auth (the HTTP server mode does not). Two extra tools are
+available: `get_session_status` (never returns cookies or tokens) and `logout_session` (releases
+the seat; for a session taken over from the browser it only removes the stored copy unless
+`end_server_session` is true). All logs go to stderr; stdout carries only the MCP protocol.
+
+```json
+{
+  "mcpServers": {
+    "jama": {
+      "command": "jama",
+      "args": ["serve", "--stdio"],
+      "env": {
+        "JAMA_URL": "https://company.jamacloud.com",
+        "JAMA_AUTH_TYPE": "session",
+        "JAMA_LOGIN_INTERACTIVE": "never"
+      }
+    }
+  }
+}
+```
+
+With `never`, run `jama login` in a terminal once; the server picks the session up from the store.
+
+### WSL, SSH and containers
+
+The browser opens **on the machine where the process runs**. In WSL that is the Linux side (it
+needs WSLg or another display); over SSH it is the remote host, not your laptop. If that machine
+has no display, log in with `--mode form` where possible, or run the tool locally. In containers
+Chromium is started with `--no-sandbox --disable-dev-shm-usage` automatically.
+
 ## CLI Commands
 
 ### Projects
 ```bash
 jama projects list                     # List all projects
 jama projects get 123                  # Get project details
-jama projects list --output json       # JSON output
+jama -o json projects list       # JSON output
 ```
 
 ### Items
@@ -237,6 +422,85 @@ jama migrate copy 123 456 --from staging --to production
 jama migrate info backup.json
 ```
 
+### Attachments
+```bash
+# Upload a file and link it to an item (shows on the item's Attachments tab)
+jama attachments upload 456 screenshot.png
+jama attachments upload 456 report.pdf --name "Test report" --description "Nightly run"
+jama attachments upload 456 screenshot.png --no-link    # create it, do not link it
+jama attachments upload 456 screenshot.png --json       # ids and embed URL for scripts
+
+# Download
+jama attachments download 789 -o report.pdf             # by attachment ID
+jama attachments download-url "https://jama.example.com/contour/attachment/9000/shot.png" -o shot.png
+```
+
+`upload` prints three things: the **attachment ID**, the **file ID** and the
+**embed URL**. They are not interchangeable: an inline image in a rich-text field
+must use the embed URL (`<base>/attachment/<fileId>/<file name>`), which is built
+from the file ID. A URL built from the attachment ID shows a broken image. After
+every upload the embed URL is checked through `GET /rest/v1/files?url=...`; if it
+does not load, the command fails.
+
+- Content type comes from the file extension (png, jpg/jpeg, gif, webp, svg, pdf;
+  anything else is sent as `application/octet-stream`).
+- Files larger than 50 MB are rejected; set `JAMA_MAX_ATTACHMENT_BYTES` to change the limit.
+- Uploading the same file to the same project again reuses the earlier attachment
+  instead of creating a duplicate (a local map under `~/.cache/jama-cli/uploads/`
+  holds ids and URLs only). Use `--no-cache` to force a new upload.
+
+### Screenshots in Test Runs
+```bash
+# Look at a test run and its steps
+jama -o json testruns get 1234
+
+# Embed screenshots in the run-level "Actual results"
+jama testruns add-screenshot 1234 shot1.png shot2.png --caption "After login"
+
+# ... or in the actual results of step 2 (steps are numbered from 1)
+jama testruns add-screenshot 1234 failure.png --step 2 --caption "Error dialog"
+
+# Write text/HTML: appended by default, --replace replaces only that field
+jama testruns set-actual 1234 --html "<p>Works as expected</p>"
+jama testruns set-actual 1234 --file result.html --step 3
+jama testruns set-actual 1234 --html "<p>Retested</p>" --step 3 --replace
+```
+
+Without `--step` the run-level "Actual results" field is written; with `--step N` the
+"Result" column of that step (the step key `result` in the REST API). Field names are read
+from the instance's test run item type.
+
+These commands change a test run with a read-modify-write: the run is read, only
+the targeted field is changed, the complete step list is sent back, and the run is
+read again to check that the other steps, their statuses and the existing HTML are
+unchanged. Existing content is appended to, never replaced, unless `--replace` is
+given. Running the same `add-screenshot` again neither uploads the file again nor
+adds a second image. Test runs are not items in Jama's REST API, so a screenshot is
+embedded by its URL but not linked to an Attachments tab; `jama attachments upload` accepts
+a test run id too (with `--project` if the project cannot be read from the run) and reports
+`Linked to test run <id>: no`. If the run cannot be edited (locked cycle, missing permission),
+Jama's error is shown and nothing is retried.
+
+The same functions are available in Python (`JamaClient.upload_attachment`,
+`download_attachment`, `download_embedded`, `embed_image_html`,
+`append_to_actual_results`, `attach_screenshots_to_test_run`) and as MCP tools
+(`upload_attachment`, `attach_screenshot_to_test_run`, `download_attachment`,
+`get_test_run`, `update_test_run`). The MCP tools accept a file path on the
+server's machine or base64 content, so they also work when the MCP client runs
+on another machine.
+
+#### Attachments with a browser-session (SSO) login
+
+With `auth_type: session`, Jama may refuse the REST call that creates an
+attachment for SSO users. Only in that case, and only under session auth,
+jama-cli falls back to the endpoint the Jama web UI itself uses
+(`POST <base>/ui/internal/attachments`), which creates the attachment and links
+it to the item in one step. **This endpoint is not part of Jama's documented REST
+API**: it can change or disappear with any Jama release. With `basic`, `api_key`
+and `oauth` it is never called; a refused upload is reported as Jama's error.
+Because that endpoint always links the attachment, `--no-link` cannot be honoured
+when the fallback is used (a warning says so).
+
 ## MCP Server
 
 ### For Claude Desktop / Cline
@@ -267,6 +531,32 @@ curl http://localhost:8000/health
 open http://localhost:8000/api/docs    # Swagger UI
 ```
 
+The attachment and test run tools (`get_test_run`, `update_test_run`, `upload_attachment`,
+`attach_screenshot_to_test_run`, `download_attachment`) are the same in both server modes;
+they come from one shared registry. In HTTP mode, list them with `GET /v1/tools` and call
+one with `POST /v1/invoke`:
+
+```bash
+curl -s http://localhost:8000/v1/tools
+curl -s http://localhost:8000/v1/invoke -H 'Content-Type: application/json' -d '{
+  "prompt": "upload_attachment",
+  "parameters": {"intent": "upload_attachment", "item_id": 456,
+                 "file_name": "shot.png", "content_base64": "<base64>"}
+}'
+```
+
+Over HTTP, files are sent as `content_base64` + `file_name`, and a download without
+`output_path` comes back as base64. File paths on the server's machine (`file_path`,
+`file_paths`, `output_path`) are refused by default. To accept them, start the server with one
+directory they are confined to:
+
+```bash
+jama serve --allow-local-paths --local-path-dir /srv/jama-exchange
+# or: JAMA_MCP_ALLOW_LOCAL_PATHS=1 JAMA_MCP_LOCAL_PATH_DIR=/srv/jama-exchange jama serve
+```
+
+The stdio server runs on your own machine and accepts paths as before.
+
 ### Available Operations
 
 The MCP server exposes 70 Jama API operations:
@@ -279,8 +569,8 @@ The MCP server exposes 70 Jama API operations:
 | Types | get_item_types, get_item_type |
 | Pick Lists | get_pick_lists, get_pick_list, get_pick_list_options |
 | Tags | get_tags, get_tagged_items |
-| Tests | get_test_plans, get_test_cycles, get_test_runs |
-| Attachments | get_attachments, upload_attachment |
+| Tests | get_test_plans, get_test_cycles, get_test_runs, get_test_run, update_test_run, attach_screenshot_to_test_run |
+| Attachments | get_attachments, upload_attachment, download_attachment |
 | ... | See full list in API documentation |
 
 ## Global Options
@@ -301,12 +591,12 @@ Options:
 
 ### List requirements and export to CSV
 ```bash
-jama items list 123 --type 45 --output csv > requirements.csv
+jama -o csv items list 123 --type 45 > requirements.csv
 ```
 
 ### Get item as JSON for scripting
 ```bash
-ITEM=$(jama items get 456 --output json)
+ITEM=$(jama -o json items get 456)
 echo $ITEM | jq '.fields.name'
 ```
 
@@ -322,7 +612,7 @@ jama items create 123 \
 
 ### Trace upstream requirements
 ```bash
-jama relationships upstream 456 --output table
+jama -o table relationships upstream 456
 ```
 
 ### Use different profile
@@ -439,7 +729,7 @@ docker run --rm \
   -e JAMA_URL=https://company.jamacloud.com \
   -e JAMA_API_KEY=your-api-key \
   ghcr.io/xorwell/jama-cli \
-  jama items list 123 --output json
+  jama -o json items list 123
 ```
 
 ### Building Locally

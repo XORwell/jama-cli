@@ -118,7 +118,7 @@ class TestHistoryDiff:
 
         result = runner.invoke(app, ["diff", "12345", "1", "2"])
         assert result.exit_code == 0
-        assert "no differences" in result.stdout.lower()
+        assert "no differences" in result.output.lower()
 
 
 class TestHelperFunctions:
