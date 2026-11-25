@@ -137,6 +137,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Calls that return Jama's status (`post_item_attachment`, `put_test_run`, `post_item_tag`,
   ...) failed with `ValueError` when Jama reported the status as text (`"OK"`)
 
+## [0.1.5] - 2026-11-25
+
+Released from the 0.1.4 tag; it contains none of the Unreleased changes above.
+
+### Security
+- Require `aiohttp` 3.14.5 or newer. 0.1.4 held `aiohttp` below 3.10 through the
+  `aiohttp-swagger3` 0.8 pin, which left known `aiohttp` advisories unfixed
+- Require `aiohttp-swagger3` 0.10, which accepts current `aiohttp` releases
+
 ## [0.1.4] - 2026-04-21
 
 ### Added
@@ -223,6 +232,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.5]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.5
 [0.1.4]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.4
 [0.1.3]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.3
 [0.1.0]: https://github.com/XORwell/jama-cli/releases/tag/v0.1.0
