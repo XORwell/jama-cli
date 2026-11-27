@@ -12,6 +12,7 @@ import yaml
 from dotenv import load_dotenv
 from loguru import logger
 
+from jama_cli.core.read_only import parse_flag, read_only_from_env
 from jama_mcp_server.models import JamaConfig, MultiServerConfig
 
 
@@ -39,7 +40,15 @@ def load_env_config(env_file: str | None = None) -> JamaConfig | None:
         oauth=os.environ.get("JAMA_OAUTH", "false").lower() == "true",
         client_id=os.environ.get("JAMA_CLIENT_ID", ""),
         client_secret=os.environ.get("JAMA_CLIENT_SECRET", ""),
+        read_only=read_only_from_env(),
     )
+
+
+def _yaml_flag(value: object) -> bool:
+    """A YAML on/off value; a string such as "false" is parsed, not taken as truthy."""
+    if isinstance(value, str):
+        return parse_flag(value)
+    return bool(value)
 
 
 def load_yaml_config(config_file: str | None = None) -> MultiServerConfig | None:
@@ -109,6 +118,7 @@ def load_yaml_config(config_file: str | None = None) -> MultiServerConfig | None
                 oauth=server_data.get("oauth", False),
                 client_id=server_data.get("client_id", ""),
                 client_secret=server_data.get("client_secret", ""),
+                read_only=_yaml_flag(server_data.get("read_only")) or read_only_from_env(),
             )
 
         return MultiServerConfig(servers=servers, default_server=data.get("default_server"))

@@ -23,9 +23,10 @@ from loguru import logger
 from py_jama_rest_client.client import JamaClient
 
 from jama_cli.core.api import JamaApi
+from jama_cli.core.exceptions import ReadOnlyModeError
 from jama_cli.core.http_client import JamaHttpClient
 from jama_mcp_server import __version__
-from jama_mcp_server.core import attachment_tools
+from jama_mcp_server.core import attachment_tools, read_only
 from jama_mcp_server.models import (
     BatchRequest,
     BatchResponse,
@@ -373,6 +374,11 @@ All API endpoints are relative to the server base URL (default: http://localhost
                 oauth=self.config.oauth,
             )
 
+        if self.config.read_only:
+            # Fails (and the server does not start) when the guard cannot be applied.
+            read_only.guard_jama_client(self.jama_client)
+            logger.info("Read-only mode: operations that would change Jama are disabled")
+
         # Test connection
         self.jama_client.get_projects()
         logger.info(f"Successfully connected to Jama instance at {self.config.url}")
@@ -432,6 +438,7 @@ All API endpoints are relative to the server base URL (default: http://localhost
             jama_url=self.config.url,
             version=__version__,
             uptime_seconds=uptime,
+            read_only=self.config.read_only,
         )
 
         # Try to get Jama project count if connected
@@ -479,6 +486,19 @@ All API endpoints are relative to the server base URL (default: http://localhost
             # Format the response
             return self._format_response(intent, result)
 
+        except ReadOnlyModeError as e:
+            logger.warning(f"Refused in read-only mode: {params.get('intent', prompt)!r}")
+            return MCPResponse(
+                response=json.dumps(
+                    {
+                        "success": False,
+                        "error": str(e),
+                        "error_code": "READ_ONLY_MODE",
+                        "intent": params.get("intent", "unknown"),
+                    }
+                ),
+                metadata={"status": "error", "error_type": "read_only", "error": str(e)},
+            )
         except ValueError as e:
             # Validation errors (missing parameters, etc.)
             logger.warning(f"Validation error in Jama request: {e}")
@@ -577,6 +597,9 @@ All API endpoints are relative to the server base URL (default: http://localhost
         Raises:
             ValueError: If required parameters are missing
         """
+        if self.config.read_only:
+            read_only.check_tool(intent, read_only.HTTP_READ_INTENTS)
+
         # Attachments and test run results: the registry shared with the stdio server.
         if intent in attachment_tools.TOOL_NAMES:
             arguments = {key: value for key, value in params.items() if key != "intent"}
@@ -1265,7 +1288,10 @@ All API endpoints are relative to the server base URL (default: http://localhost
 
     async def _handle_tools(self, _request: web.Request) -> web.Response:
         """List the shared tools; call one with POST /v1/invoke and parameters.intent."""
-        return web.json_response({"tools": self.shared_tools()})
+        tools = self.shared_tools()
+        if self.config.read_only:
+            tools = [tool for tool in tools if tool["name"] in read_only.HTTP_READ_INTENTS]
+        return web.json_response({"tools": tools, "read_only": self.config.read_only})
 
     async def _handle_invoke(self, request: web.Request) -> web.Response:
         """Handle an invoke request."""

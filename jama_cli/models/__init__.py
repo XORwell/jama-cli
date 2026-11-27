@@ -67,6 +67,9 @@ class JamaProfile(BaseModel):
         default=None, description="Override path to the browser cookie store / User Data dir"
     )
 
+    # Refuse every request that could change Jama (CLI and MCP server).
+    read_only: bool = Field(default=False, description="Never change anything in Jama")
+
     @field_validator("sso_selectors", mode="before")
     @classmethod
     def split_selectors(cls, v: Any) -> Any:
@@ -103,6 +106,7 @@ class JamaProfile(BaseModel):
             "api_key": mask(self.api_key) if self.api_key else "",
             "client_id": mask(self.client_id) if self.client_id else "",
             "username": mask(self.username) if self.username else "",
+            "read_only": "yes" if self.read_only else "",
         }
 
     def has_valid_credentials(self) -> bool:

@@ -296,14 +296,23 @@ def tool_listing() -> list[dict[str, Any]]:
 
 def http_client_for(config: Any) -> JamaHttpClient:
     """An async Jama client for a server ``JamaConfig`` (OAuth, API key or basic)."""
+    read_only = bool(getattr(config, "read_only", False))
     if config.client_id and config.client_secret:
         return JamaHttpClient(
-            base_url=config.url, credentials=(config.client_id, config.client_secret), oauth=True
+            base_url=config.url,
+            credentials=(config.client_id, config.client_secret),
+            oauth=True,
+            read_only=read_only,
         )
     if config.api_key:
-        return JamaHttpClient(base_url=config.url, credentials=(config.api_key, ""))
+        return JamaHttpClient(
+            base_url=config.url, credentials=(config.api_key, ""), read_only=read_only
+        )
     return JamaHttpClient(
-        base_url=config.url, credentials=(config.username, config.password), oauth=config.oauth
+        base_url=config.url,
+        credentials=(config.username, config.password),
+        oauth=config.oauth,
+        read_only=read_only,
     )
 
 

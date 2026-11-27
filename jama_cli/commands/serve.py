@@ -25,6 +25,8 @@ app = typer.Typer(name="serve", help="Start MCP server for AI assistants")
 RUNTIME_DIR = Path.home() / ".jama"
 PID_FILE = RUNTIME_DIR / "server.pid"
 LOG_FILE = RUNTIME_DIR / "server.log"
+# Mode of the last daemon started ("read-only" or "read-write"), so restart keeps it.
+MODE_FILE = RUNTIME_DIR / "server.mode"
 
 
 def _get_pid() -> int | None:
@@ -46,6 +48,14 @@ def _write_pid(pid: int) -> None:
     """Write the PID to the PID file."""
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     PID_FILE.write_text(str(pid))
+
+
+def _daemon_was_read_only() -> bool:
+    """Whether the last daemon was started in read-only mode."""
+    try:
+        return MODE_FILE.read_text().strip() == "read-only"
+    except OSError:
+        return False
 
 
 def _remove_pid() -> None:
@@ -93,6 +103,14 @@ def serve(
             help="HTTP mode: the one directory such file paths are confined to",
         ),
     ] = None,
+    read_only: Annotated[
+        bool,
+        typer.Option(
+            "--read-only",
+            help="Refuse every tool that would change Jama (also: profile 'read_only', "
+            "JAMA_READ_ONLY=1)",
+        ),
+    ] = False,
 ) -> None:
     """Start the MCP server.
 
@@ -103,6 +121,7 @@ def serve(
         jama serve --stdio            # stdio MCP server for Claude Desktop
         jama serve --port 9000        # HTTP server on custom port
         jama serve --daemon           # Run in background
+        jama serve --stdio --read-only  # stdio server that cannot change Jama
         jama serve stop               # Stop background server
         jama serve status             # Check if server is running
     """
@@ -138,7 +157,11 @@ def serve(
         oauth=profile.auth_type == "oauth",
         client_id=profile.client_id or "",
         client_secret=profile.client_secret or "",
+        # The flag, the profile key or JAMA_READ_ONLY (applied by get_profile_or_env).
+        read_only=read_only or profile.read_only,
     )
+    if config.read_only:
+        logger.info("Read-only mode is on")
 
     if profile.auth_type == "session" and not stdio:
         print_error("auth_type 'session' is only supported by the stdio server (--stdio).")
@@ -164,6 +187,7 @@ def serve(
             ctx.obj.get("profile") if ctx.obj else None,
             allow_local_paths,
             local_path_dir,
+            config.read_only,
         )
     else:
         _run_http_server(config, host, port, api_key, allow_local_paths, local_path_dir)
@@ -184,6 +208,14 @@ def start_daemon(
         str | None,
         typer.Option("--api-key", envvar="MCP_API_KEY", help="API key for server auth"),
     ] = None,
+    read_only: Annotated[
+        bool,
+        typer.Option(
+            "--read-only",
+            help="Refuse every tool that would change Jama (also: profile 'read_only', "
+            "JAMA_READ_ONLY=1)",
+        ),
+    ] = False,
 ) -> None:
     """Start the server in background (daemon mode)."""
     existing_pid = _get_pid()
@@ -193,7 +225,7 @@ def start_daemon(
         raise typer.Exit(1)
 
     profile_name = ctx.obj.get("profile") if ctx.obj else None
-    _start_daemon(host, port, api_key, profile_name)
+    _start_daemon(host, port, api_key, profile_name, read_only=read_only)
 
 
 def _start_daemon(
@@ -203,6 +235,7 @@ def _start_daemon(
     profile_name: str | None,
     allow_local_paths: bool = False,
     local_path_dir: Path | None = None,
+    read_only: bool = False,
 ) -> None:
     """Start the server as a background daemon."""
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -218,6 +251,8 @@ def _start_daemon(
         cmd.append("--allow-local-paths")
     if local_path_dir:
         cmd.extend(["--local-path-dir", str(local_path_dir)])
+    if read_only:
+        cmd.append("--read-only")
 
     # Write startup info to log file
     with open(LOG_FILE, "a") as log_init:
@@ -244,8 +279,9 @@ def _start_daemon(
         print_error("Server failed to start. Check logs with 'jama serve logs'")
         raise typer.Exit(1)
 
-    # Write PID file
+    # Write PID file, and the mode so that 'jama serve restart' keeps it
     _write_pid(process.pid)
+    MODE_FILE.write_text("read-only" if read_only else "read-write")
 
     print_success(f"Server started in background (PID: {process.pid})")
     console.print(f"  URL: http://{host}:{port}")
@@ -318,6 +354,8 @@ def server_status() -> None:
                     data = json.loads(resp.read())
                     console.print(f"  Status: {data.get('status', 'unknown')}")
                     console.print(f"  Jama URL: {data.get('jama_url', 'unknown')}")
+                    if "read_only" in data:
+                        console.print(f"  Read-only: {'yes' if data['read_only'] else 'no'}")
                     if data.get("uptime_seconds"):
                         uptime = int(data["uptime_seconds"])
                         console.print(f"  Uptime: {uptime // 60}m {uptime % 60}s")
@@ -378,8 +416,22 @@ def restart_daemon(
         str | None,
         typer.Option("--api-key", envvar="MCP_API_KEY", help="API key for server auth"),
     ] = None,
+    read_only: Annotated[
+        bool,
+        typer.Option(
+            "--read-only",
+            help="Refuse every tool that would change Jama (also: profile 'read_only', "
+            "JAMA_READ_ONLY=1)",
+        ),
+    ] = False,
 ) -> None:
-    """Restart the background server."""
+    """Restart the background server.
+
+    A server that was started read-only comes back read-only.
+    """
+    if not read_only and _daemon_was_read_only():
+        console.print("Keeping read-only mode of the previous server.")
+        read_only = True
     pid = _get_pid()
     if pid:
         console.print("Stopping server...")
@@ -388,7 +440,7 @@ def restart_daemon(
 
     console.print("Starting server...")
     profile_name = ctx.obj.get("profile") if ctx.obj else None
-    _start_daemon(host, port, api_key, profile_name)
+    _start_daemon(host, port, api_key, profile_name, read_only=read_only)
 
 
 def _run_stdio_server(config: Any, session_settings: Any = None) -> None:

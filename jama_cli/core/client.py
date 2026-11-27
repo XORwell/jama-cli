@@ -21,6 +21,7 @@ from jama_cli.core.attachments import (
     default_upload_cache_path,
     embed_image_html,
 )
+from jama_cli.core.read_only import read_only_from_env
 from jama_cli.core.sync_wrapper import SyncJamaApi
 from jama_cli.core.testruns import ActualResultsUpdate, ScreenshotsResult, TestRunService
 from jama_cli.models import JamaProfile
@@ -254,23 +255,29 @@ class JamaClient:
         if self._api is not None:
             return
 
+        # The profile key or JAMA_READ_ONLY; covers commands such as diff and
+        # migrate that pick profiles from the config file directly.
+        read_only = self.profile.read_only or read_only_from_env()
         if self.profile.auth_type == "api_key":
             self._api = SyncJamaApi.from_credentials(
                 base_url=self.profile.url,
                 credentials=(self.profile.api_key, ""),
                 oauth=False,
+                read_only=read_only,
             )
         elif self.profile.auth_type == "oauth":
             self._api = SyncJamaApi.from_credentials(
                 base_url=self.profile.url,
                 credentials=(self.profile.client_id, self.profile.client_secret),
                 oauth=True,
+                read_only=read_only,
             )
         elif self.profile.auth_type == "basic":
             self._api = SyncJamaApi.from_credentials(
                 base_url=self.profile.url,
                 credentials=(self.profile.username, self.profile.password),
                 oauth=False,
+                read_only=read_only,
             )
         elif self.profile.auth_type == "session":
             from jama_cli.core.session import SessionManager
@@ -278,6 +285,7 @@ class JamaClient:
             self._api = SyncJamaApi.from_session(
                 base_url=self.profile.url,
                 session=SessionManager(self.profile.session_settings()),
+                read_only=read_only,
             )
         else:
             raise ValueError(f"Unknown auth type: {self.profile.auth_type}")

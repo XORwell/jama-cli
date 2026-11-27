@@ -8,6 +8,7 @@ from pathlib import Path
 import yaml
 from loguru import logger
 
+from jama_cli.core.read_only import read_only_from_env
 from jama_cli.models import JamaConfig, JamaProfile
 
 # Session-auth settings: profile key -> environment variable. Like the
@@ -127,6 +128,8 @@ def save_config(config: JamaConfig) -> None:
             profile_data["username"] = profile.username
         if profile.password:
             profile_data["password"] = profile.password
+        if profile.read_only:
+            profile_data["read_only"] = True
         if profile.auth_type == "session":
             # Only non-default session settings are written back.
             defaults = JamaProfile.model_fields
@@ -202,24 +205,37 @@ def get_profile_or_env(profile_name: str | None = None) -> JamaProfile | None:
             auth_type = None
 
         if auth_type:
-            return _apply_session_env(
-                JamaProfile(
-                    url=jama_url,
-                    auth_type=auth_type,
-                    api_key=api_key,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                    username=username,
-                    password=password,
+            return _apply_read_only_env(
+                _apply_session_env(
+                    JamaProfile(
+                        url=jama_url,
+                        auth_type=auth_type,
+                        api_key=api_key,
+                        client_id=client_id,
+                        client_secret=client_secret,
+                        username=username,
+                        password=password,
+                    )
                 )
             )
 
     # Fall back to config file
     profile = get_profile(profile_name)
     if profile and profile.auth_type == "session":
-        return _apply_session_env(profile)
+        profile = _apply_session_env(profile)
 
-    return profile
+    return _apply_read_only_env(profile) if profile else None
+
+
+def _apply_read_only_env(profile: JamaProfile) -> JamaProfile:
+    """Turn read-only mode on when JAMA_READ_ONLY says so.
+
+    The variable can only turn the mode on: ``read_only: true`` in a profile
+    stays on whatever the environment says.
+    """
+    if profile.read_only or not read_only_from_env():
+        return profile
+    return profile.model_copy(update={"read_only": True})
 
 
 def _apply_session_env(profile: JamaProfile) -> JamaProfile:

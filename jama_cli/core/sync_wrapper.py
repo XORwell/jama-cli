@@ -39,6 +39,7 @@ class SyncJamaApi:
         credentials: tuple[str, str],
         oauth: bool = False,
         timeout: float = 30.0,
+        read_only: bool = False,
     ) -> SyncJamaApi:
         """Create a SyncJamaApi from connection credentials."""
         http = JamaHttpClient(
@@ -46,6 +47,7 @@ class SyncJamaApi:
             credentials=credentials,
             oauth=oauth,
             timeout=timeout,
+            read_only=read_only,
         )
         api = JamaApi(http)
         return cls(api, http)
@@ -56,9 +58,12 @@ class SyncJamaApi:
         base_url: str,
         session: SessionManager,
         timeout: float = 30.0,
+        read_only: bool = False,
     ) -> SyncJamaApi:
         """Create a SyncJamaApi that authenticates with a Jama web session."""
-        http = JamaHttpClient(base_url=base_url, session=session, timeout=timeout)
+        http = JamaHttpClient(
+            base_url=base_url, session=session, timeout=timeout, read_only=read_only
+        )
         api = JamaApi(http)
         return cls(api, http)
 

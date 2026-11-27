@@ -24,6 +24,7 @@ class JamaConfig(BaseModel):
     oauth: bool = Field(False, description="Whether to use OAuth authentication")
     client_id: str = Field("", description="OAuth client ID")
     client_secret: str = Field("", description="OAuth client secret")
+    read_only: bool = Field(default=False, description="Refuse every tool that would change Jama")
 
     @field_validator("url")
     @classmethod
@@ -147,6 +148,7 @@ class HealthCheckResponse(BaseModel):
     error: str | None = Field(default=None, description="Error message if any")
     version: str | None = Field(default=None, description="Server version")
     uptime_seconds: float | None = Field(default=None, description="Server uptime in seconds")
+    read_only: bool = Field(default=False, description="Whether read-only mode is on")
 
 
 class BatchRequest(BaseModel):

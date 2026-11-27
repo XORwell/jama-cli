@@ -56,3 +56,10 @@ class TooManyRequestsException(APIClientException):
     ):
         super().__init__(message, status_code, reason)
         self.retry_after = retry_after
+
+
+class ReadOnlyModeError(CoreException):
+    """A request that would change Jama was refused because read-only mode is on.
+
+    Raised before anything is sent, so the Jama instance never sees the request.
+    """

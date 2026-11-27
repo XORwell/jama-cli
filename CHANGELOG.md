@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Read-only mode for the MCP servers and the CLI: `jama serve --read-only`, `JAMA_READ_ONLY=1`
+  or `read_only: true` in a profile. Tools that would change Jama are not listed and are refused
+  with `error_code: READ_ONLY_MODE`. Independently, the HTTP client refuses every request other
+  than GET/HEAD/OPTIONS before sending it, and the HTTP server guards its py-jama-rest-client
+  session the same way (it does not start if it cannot). Once on, no setting turns it off again.
+  `GET /v1/tools` and `GET /health` report the mode. Off by default.
 - HTTP-mode MCP server: the attachment and test run tools (`get_test_run`,
   `update_test_run`, `upload_attachment`, `attach_screenshot_to_test_run`,
   `download_attachment`) are available there too, from the same registry the stdio server

@@ -17,9 +17,10 @@ from mcp.server import Server
 from mcp.types import TextContent, Tool
 
 from jama_cli.core.api import JamaApi
+from jama_cli.core.exceptions import ReadOnlyModeError
 from jama_cli.core.http_client import JamaHttpClient
 from jama_cli.core.session import SessionManager, SessionSettings
-from jama_mcp_server.core import attachment_tools
+from jama_mcp_server.core import attachment_tools, read_only
 from jama_mcp_server.models import JamaConfig
 
 
@@ -51,8 +52,8 @@ class JamaStdioMCPServer:
 
         @self.mcp.list_tools()
         async def list_tools() -> list[Tool]:
-            """List all available Jama tools."""
-            return [
+            """List the Jama tools; in read-only mode only those that cannot change Jama."""
+            tools = [
                 Tool(
                     name="get_projects",
                     description="Get all accessible Jama projects",
@@ -699,6 +700,9 @@ class JamaStdioMCPServer:
                     },
                 ),
             ]
+            if self.config.read_only:
+                tools = [tool for tool in tools if tool.name in read_only.STDIO_READ_TOOLS]
+            return tools
 
         @self.mcp.call_tool()
         async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
@@ -711,6 +715,10 @@ class JamaStdioMCPServer:
 
                 return [TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
 
+            except ReadOnlyModeError as e:
+                logger.warning(f"Refused in read-only mode: {name}")
+                payload = {"error": str(e), "error_code": "READ_ONLY_MODE", "tool": name}
+                return [TextContent(type="text", text=json.dumps(payload))]
             except Exception as e:
                 logger.error(f"Error executing tool {name}: {e}")
                 return [TextContent(type="text", text=json.dumps({"error": str(e), "tool": name}))]
@@ -721,6 +729,9 @@ class JamaStdioMCPServer:
             raise RuntimeError("Jama client not initialized")
 
         api = self._api
+
+        if self.config.read_only:
+            read_only.check_tool(name, read_only.STDIO_READ_TOOLS)
 
         if name == "get_session_status":
             if not self._session:
@@ -942,11 +953,17 @@ class JamaStdioMCPServer:
         """Initialize the async Jama HTTP client and API."""
         try:
             logger.info(f"Initializing Jama client for {self.config.url}")
+            if self.config.read_only:
+                logger.info("Read-only mode: tools that would change Jama are disabled")
 
             if self.session_settings is not None:
                 logger.info("Using browser-session authentication")
                 self._session = SessionManager(self.session_settings)
-                self._http = JamaHttpClient(base_url=self.config.url, session=self._session)
+                self._http = JamaHttpClient(
+                    base_url=self.config.url,
+                    session=self._session,
+                    read_only=self.config.read_only,
+                )
                 self._api = JamaApi(self._http)
                 logger.info("Jama client initialized successfully")
                 return
@@ -968,6 +985,7 @@ class JamaStdioMCPServer:
                 base_url=self.config.url,
                 credentials=credentials,
                 oauth=oauth,
+                read_only=self.config.read_only,
             )
             self._api = JamaApi(self._http)
             logger.info("Jama client initialized successfully")

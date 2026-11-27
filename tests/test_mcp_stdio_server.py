@@ -63,6 +63,7 @@ class TestInitializeClient:
                 base_url="https://test.jamacloud.com",
                 credentials=("client123", "secret456"),
                 oauth=True,
+                read_only=False,
             )
             assert server._api is not None
 
@@ -81,6 +82,7 @@ class TestInitializeClient:
                 base_url="https://test.jamacloud.com",
                 credentials=("apikey123", ""),
                 oauth=False,
+                read_only=False,
             )
 
     @pytest.mark.asyncio
@@ -100,6 +102,7 @@ class TestInitializeClient:
                 base_url="https://test.jamacloud.com",
                 credentials=("user", "pass"),
                 oauth=False,
+                read_only=False,
             )
 
     @pytest.mark.asyncio

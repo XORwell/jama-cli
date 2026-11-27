@@ -123,6 +123,23 @@ servers:
     password: your_password
 ```
 
+### Read-only mode
+
+Add `read_only: true` to a server (or to a CLI profile in `~/.jama/config.yml`) to make sure
+nothing in that instance is changed: the MCP servers hide and refuse every tool that would
+change Jama, and the HTTP client refuses every request other than GET/HEAD/OPTIONS.
+
+```yaml
+servers:
+  production:
+    url: https://instance.jamacloud.com
+    api_key: your_api_key
+    read_only: true
+```
+
+`JAMA_READ_ONLY=1` and `jama serve --read-only` turn it on as well. Once one setting turns it
+on, no other setting turns it off. See the README section "Read-only mode" for details.
+
 ## Legacy .env Configuration (Deprecated)
 
 > ⚠️ **Note**: The `.env` file format is **deprecated** and maintained only for backward compatibility. 

@@ -46,6 +46,7 @@ jama -o json items get 456
 - **stdio mode**: Native integration with Claude Desktop, Cline, VS Code
 - **HTTP mode**: REST API with OpenAPI documentation
 - **70 Jama operations**: Complete API coverage
+- **Read-only mode**: `--read-only` lets an AI assistant read Jama without being able to change it
 
 ### Output Formats
 ```bash
@@ -543,6 +544,62 @@ jama serve --allow-local-paths --local-path-dir /srv/jama-exchange
 ```
 
 The stdio server runs on your own machine and accepts paths as before.
+
+### Read-only mode
+
+Read-only mode lets you connect an AI assistant to a production Jama instance without
+giving it the power to change anything there. Turn it on in any of these ways:
+
+```bash
+jama serve --stdio --read-only         # flag (stdio, HTTP and daemon mode)
+JAMA_READ_ONLY=1 jama serve --stdio    # environment variable (1/true/yes/on)
+```
+
+```yaml
+# ~/.jama/config.yml
+profiles:
+  production:
+    url: https://company.jamacloud.com
+    auth_type: api_key
+    api_key: ${JAMA_API_KEY}
+    read_only: true                    # always read-only, for the CLI as well
+```
+
+Any one of them turns read-only mode on, and none of them can turn it off again:
+`JAMA_READ_ONLY=0` does not override `read_only: true` in a profile. A value the server does
+not recognise counts as on.
+`jama serve restart` keeps the mode of the daemon it replaces, and `jama serve status` shows it.
+
+```json
+{
+  "mcpServers": {
+    "jama": {
+      "command": "jama",
+      "args": ["serve", "--stdio", "--read-only"]
+    }
+  }
+}
+```
+
+In read-only mode:
+
+- Tools that would change Jama (`create_item`, `update_item`, `delete_item`, `set_item_lock`,
+  `create_relationship`, `update_test_run`, `upload_attachment`, ...) are not listed. Calling one
+  anyway returns an error with `"error_code": "READ_ONLY_MODE"`, and nothing is sent to Jama.
+- Behind the tool lists, the HTTP client itself refuses every request other than GET, HEAD and
+  OPTIONS before sending it. That also stops the reads-then-write tools (test run updates,
+  screenshots) at their first write. Logging in (OAuth token, browser session) still works.
+- `download_attachment` stays available: it only reads from Jama, although it may write a local
+  file. `get_session_status` and `logout_session` stay available too, because they manage your
+  local login, not Jama data.
+- HTTP mode: `GET /v1/tools` and `GET /health` report `"read_only": true`. If the server cannot
+  apply the guard to its py-jama-rest-client connection, it does not start.
+- CLI commands with a read-only profile, or with `JAMA_READ_ONLY` set, fail on any change
+  (for example `jama items create`, `jama migrate`) without sending it.
+
+Read-only mode limits what jama-cli does. The Jama account it uses can still do whatever its
+permissions allow, so for the strongest guarantee use an account that only has read
+permissions in Jama as well.
 
 ### Available Operations
 

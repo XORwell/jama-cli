@@ -22,10 +22,12 @@ from jama_cli.core.exceptions import (
     APIException,
     APIServerException,
     CoreException,
+    ReadOnlyModeError,
     ResourceNotFoundException,
     TooManyRequestsException,
     UnauthorizedException,
 )
+from jama_cli.core.read_only import SAFE_METHODS, refusal_message
 from jama_cli.core.session import LOGIN_HINT, SessionManager, is_auth_rejected, is_csrf_rejected
 from jama_cli.core.session_store import StoredSession
 
@@ -42,6 +44,10 @@ class JamaHttpClient:
     - oauth: client_credentials grant with proactive token refresh
     - session: cookies of a Jama web session (pass ``session``), shared with
       other processes through the session store and repaired when it dies
+
+    With ``read_only=True`` every request other than GET/HEAD/OPTIONS raises
+    :class:`ReadOnlyModeError` before it is sent. Authentication (OAuth token,
+    session login and logout) uses its own requests and is not affected.
     """
 
     def __init__(
@@ -53,7 +59,9 @@ class JamaHttpClient:
         page_size: int = MAX_PAGE_SIZE,
         session: SessionManager | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        read_only: bool = False,
     ) -> None:
+        self._read_only = read_only
         self._base_url = base_url.rstrip("/")
         self._api_url = f"{self._base_url}/rest/v1/"
         self._credentials = credentials
@@ -147,7 +155,11 @@ class JamaHttpClient:
 
         Raises:
             Typed exceptions for non-2xx responses
+            ReadOnlyModeError: a write in read-only mode (nothing is sent)
         """
+        if self._read_only and method.upper() not in SAFE_METHODS:
+            raise ReadOnlyModeError(refusal_message(f"{method.upper()} {path}"))
+
         if self._oauth:
             await self._ensure_token()
 
@@ -184,6 +196,11 @@ class JamaHttpClient:
 
         # Should not reach here, but satisfy type checker
         raise CoreException("Max retries exceeded")
+
+    @property
+    def read_only(self) -> bool:
+        """Whether this client refuses every request that could change Jama."""
+        return self._read_only
 
     # --- Session auth ---
 

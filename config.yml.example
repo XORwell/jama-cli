@@ -21,6 +21,8 @@ servers:
     oauth: true
     client_id: your_production_client_id
     client_secret: your_production_client_secret
+    # Never change anything in this instance (MCP tools and CLI writes are refused)
+    read_only: true
     
   # Alternative: Using API key authentication
   api_key_example:
@@ -46,3 +48,6 @@ servers:
 #
 # 4. Run in stdio mode for Claude Desktop/Cline:
 #    jama serve --stdio
+#
+# 5. Read-only stdio server (cannot change Jama):
+#    jama serve --stdio --read-only
