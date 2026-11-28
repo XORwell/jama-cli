@@ -144,8 +144,7 @@ or with environment variables: `JAMA_URL=... JAMA_AUTH_TYPE=session`.
 ```bash
 jama login      # Log in and store the session
 jama status     # Base URL, user, age, last validation, and whether the session is valid right now
-jama logout     # Log out on the server (releases the license seat) and delete the stored session
-                # (a session taken over with --from-browser is only removed locally, see below)
+jama logout     # End the CLI session
 ```
 
 `jama login` options: `--mode browser|form`, `--browser-channel`, `--browser-profile-dir`,
@@ -161,66 +160,6 @@ name; delete them afterwards).
 - **`form`:** native Jama login without a browser, for non-SSO instances and service accounts.
   Takes `username`/`password` from the profile or `JAMA_USERNAME`/`JAMA_PASSWORD`. Does not need
   Playwright.
-
-### Reuse your running browser's session (`--from-browser`)
-
-By default `login` opens its own browser profile, which is a **second** Jama session. If your
-instance allows only one session per account, that second login and your real browser session
-evict each other, so you cannot browse and use the CLI/MCP server at the same time.
-
-`--from-browser` avoids that: it reads the Jama session cookies Firefox already has and
-reuses them, so browser, CLI and MCP server share **one** session. No second login, nothing is
-evicted.
-
-```bash
-jama login --from-browser firefox     # read the session from Firefox
-# optional: a non-default Firefox profile, or an explicit cookie-store path
-jama login --from-browser firefox --browser-cookie-profile "abcd1234.default-release"
-jama login --from-browser firefox --browser-cookies-path "<dir with profiles.ini>"
-```
-
-`--from-browser` applies to that one call. The stored session remembers that it came from
-Firefox, so when it later ends, every process using it (other terminals, the MCP server)
-reads Firefox again instead of logging in on its own, whatever its own settings say. To
-make *every* login go through Firefox, including the first one and after `jama logout`, set
-`session_source: firefox` in the profile or `JAMA_SESSION_SOURCE=firefox` in the
-environment, also in the `env` block of the MCP server. Reading the browser is
-non-interactive, so it works with `login_interactive: never`. Sign in to Jama in Firefox first; if
-you sign out there, the shared session ends for the CLI too (that coupling is the point).
-
-**Where Firefox is looked for.** Windows: `%APPDATA%\Mozilla\Firefox`. macOS:
-`~/Library/Application Support/Firefox`. Linux: `~/.mozilla/firefox`, `~/.config/mozilla/firefox`,
-Snap (`~/snap/firefox/common/.mozilla/firefox`) and Flatpak
-(`~/.var/app/org.mozilla.firefox/.mozilla/firefox`). In WSL the Windows host's Firefox and a
-Firefox inside WSL are both considered; with several installs the most recently used profile wins.
-For the Windows side the Windows user is asked of Windows (`cmd.exe`, also when Windows is not on
-`PATH`), not guessed, and the drives are located through `/proc/mounts`, so a custom automount
-root in `/etc/wsl.conf` works. With interop off, the single Windows user that has a Firefox
-profile is used; with several, none is picked. `--browser-cookies-path` overrides all of this.
-
-**Where the cookies are.** Jama's `JSESSIONID` and `jama-csrf-token` are session cookies, and
-Firefox never writes session cookies to `cookies.sqlite`. While Firefox runs they are only in its
-session store, `sessionstore-backups/recovery.jsonlz4`, which Firefox rewrites about every 15
-seconds. So right after signing in to Jama, wait a few seconds before `jama login --from-browser
-firefox`. Private windows, containers and partitioned cookies are ignored. Only the two Jama
-cookies, and only for your configured host, are ever read; copies of locked files are deleted
-right after reading. Firefox keeps cookie values in clear text, so no decryption and no Windows
-component is involved.
-
-**Logout.** A session taken over from Firefox *is* your browser's session. `jama logout` therefore
-only removes the stored copy and tells you so ("Removed the stored session; your browser session
-is still active"). `jama logout --end-server-session` really ends it on the server, which also
-signs you out in the browser. `jama status` shows where the stored session came from (`source`).
-
-**Only Firefox is supported.** Chrome and Edge (version 127 and later) bind the cookie key to
-the Windows user with App-Bound Encryption. Getting around that from outside the browser is what
-credential-stealing malware does, and endpoint security treats it that way, so this tool does not
-attempt it. `--from-browser chrome` or `edge` stops with an error and does **not** fall back to a
-fresh login (which would evict your browser session). Use Firefox, or plain `jama login`.
-
-> Reading another application's browser cookies may be restricted by your company policy or
-> flagged by endpoint security. And, as with any session reuse, confirm with your Jama admin that
-> reusing a web session for REST is allowed on your instance.
 
 ### How the session is kept
 
@@ -249,9 +188,6 @@ Environment variables override the profile.
 | `browser_channel` | `JAMA_BROWSER_CHANNEL` | bundled Chromium | `chrome`, `msedge`, ... |
 | `browser_profile_dir` | `JAMA_BROWSER_PROFILE_DIR` | `~/.jama/browser-profile` | Persistent browser profile |
 | `sso_selectors` | `JAMA_SSO_SELECTORS` | `#loginWithSSOButton`, `input[name="submitWithSSO"]` | CSS selectors of the SSO button (list; comma-separated in the env var) |
-| `session_source` | `JAMA_SESSION_SOURCE` | off (log in) | Reuse the browser's session: `firefox` |
-| `browser_cookie_profile` | `JAMA_BROWSER_COOKIE_PROFILE` | main profile | Browser profile to read cookies from |
-| `browser_cookies_path` | `JAMA_BROWSER_COOKIES_PATH` | auto-detected | Path to Firefox's `cookies.sqlite` or the directory with `profiles.ini` |
 | `session_file` | `JAMA_SESSION_FILE` | `~/.jama/sessions/<hash>.json` | Session store file |
 | `login_debug_dir` | `JAMA_LOGIN_DEBUG_DIR` | off | Screenshots of each login step |
 | `session_keepalive_minutes` | `JAMA_SESSION_KEEPALIVE_MINUTES` | `0` (off) | MCP server only: one cheap request every N minutes |
@@ -264,12 +200,13 @@ Environment variables override the profile.
 - `never`: never start a browser; fail with "run `jama login`". Use this on servers and in CI.
   (`form` logins need no browser and still work.)
 
+See the [Firefox session reuse guide](docs/firefox-session-reuse.md) for optional Firefox-specific settings and logout behavior.
+
 ### MCP server
 
 `jama serve --stdio` supports session auth (the HTTP server mode does not). Two extra tools are
-available: `get_session_status` (never returns cookies or tokens) and `logout_session` (releases
-the seat; for a session taken over from the browser it only removes the stored copy unless
-`end_server_session` is true). All logs go to stderr; stdout carries only the MCP protocol.
+available: `get_session_status` (never returns cookies or tokens) and `logout_session`.
+All logs go to stderr; stdout carries only the MCP protocol.
 
 ```json
 {
