@@ -1,6 +1,6 @@
-# Contributing to Jama MCP Server
+# Contributing to Jama CLI
 
-We love your input! We want to make contributing to Jama MCP Server as easy and transparent as possible, whether it's:
+We love your input! We want to make contributing to Jama CLI as easy and transparent as possible, whether it's:
 
 - Reporting a bug
 - Discussing the current state of the code
@@ -34,19 +34,19 @@ We use GitHub to host code, to track issues and feature requests, as well as acc
    ```
 4. Set up pre-commit hooks
    ```bash
-   pre-commit install
+   poetry run pre-commit install --hook-type pre-commit --hook-type pre-push
    ```
 
-### Code Style
+### Code Quality
 
-We use the following tools to ensure code quality:
+Run the same checks as CI from the repository root:
 
-- **Black** for code formatting
-- **isort** for import sorting
-- **mypy** for static type checking
-- **flake8** for linting
-
-All of these checks are run in the CI pipeline for each pull request.
+```bash
+poetry run ruff check .
+poetry run black --check .
+poetry run isort --check-only .
+poetry run mypy jama_cli jama_mcp_server
+```
 
 ## Testing
 
@@ -58,7 +58,7 @@ poetry run pytest
 
 ## Documentation
 
-Update the documentation when adding or changing features. Documentation is written in Markdown and stored in the `docs/` directory.
+Update the documentation when adding or changing features. Update the relevant usage examples in `README.md` or `EXAMPLES.md` when command behavior changes.
 
 ## License
 
