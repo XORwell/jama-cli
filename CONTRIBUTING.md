@@ -50,11 +50,13 @@ poetry run mypy jama_cli jama_mcp_server
 
 ## Testing
 
-Please write tests for any new features or bug fixes. Run the tests with:
+Please write tests for any new features or bug fixes. Run the default unit test suite from the repository root. It uses test doubles and requires no live Jama instance. CI runs this suite on Python 3.10, 3.11, and 3.12.
 
 ```bash
 poetry run pytest
 ```
+
+To run a single unit test during development, pass its pytest node ID to `poetry run pytest`. Tests that require a live Jama instance are opt-in and can require credentials and test data.
 
 ## Documentation
 
